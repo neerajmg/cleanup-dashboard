@@ -1,0 +1,12 @@
+# Personal scan history and review verdicts — never commit
+review_state.json
+review_state.json.tmp
+
+# Build artifacts
+*.app/
+__pycache__/
+*.pyc
+
+# OS noise
+.DS_Store
+nohup.out

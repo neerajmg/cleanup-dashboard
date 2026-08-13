@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cleanup Dashboard</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --border: #e2e5ea;
+    --text: #1a1d23;
+    --text-muted: #6b7280;
+    --accent: #2563eb;
+    --accent-weak: #eef2ff;
+    --danger: #dc2626;
+    --danger-weak: #fef2f2;
+    --warn: #d97706;
+    --warn-weak: #fffbeb;
+    --ok: #16a34a;
+    --ok-weak: #f0fdf4;
+    --muted-weak: #eef0f3;
+    --radius: 10px;
+    --shadow: 0 4px 16px rgba(0,0,0,0.15);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115;
+      --surface: #171a21;
+      --border: #2a2e37;
+      --text: #e7e9ee;
+      --text-muted: #9aa1ac;
+      --accent: #5b8def;
+      --accent-weak: #172036;
+      --danger: #f87171;
+      --danger-weak: #2a1616;
+      --warn: #fbbf24;
+      --warn-weak: #2a2214;
+      --ok: #4ade80;
+      --ok-weak: #12241a;
+      --muted-weak: #20242c;
+      --shadow: 0 4px 16px rgba(0,0,0,0.5);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  header { padding: 24px 28px 16px; max-width: 1240px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
+  .subtitle { color: var(--text-muted); font-size: 13px; }
+  .container { max-width: 1240px; margin: 0 auto; padding: 0 28px 60px; }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin: 18px 0 24px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  .stat-value { font-size: 22px; font-weight: 600; }
+  .stat-label { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+
+  .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  input[type="search"] {
+    flex: 1; min-width: 180px; padding: 8px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); font-size: 13px;
+  }
+  .chips { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .chips button {
+    border: none; border-radius: 0; border-right: 1px solid var(--border);
+    background: var(--surface); padding: 7px 12px; font-size: 12.5px;
+    color: var(--text-muted);
+  }
+  .chips button:last-child { border-right: none; }
+  .chips button.active { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+  label.toggle {
+    display: flex; align-items: center; gap: 6px; color: var(--text-muted);
+    font-size: 13px; cursor: pointer; user-select: none;
+  }
+  button {
+    font: inherit; cursor: pointer; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); padding: 7px 12px; transition: filter 0.1s;
+  }
+  button:hover { filter: brightness(0.96); }
+  @media (prefers-color-scheme: dark) { button:hover { filter: brightness(1.15); } }
+  button.danger { background: var(--danger-weak); border-color: var(--danger); color: var(--danger); }
+  button.primary-act { min-width: 84px; font-weight: 600; }
+  button.small { padding: 5px 12px; font-size: 12.5px; }
+
+  section { margin-bottom: 32px; }
+  section h2 {
+    font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--text-muted); margin: 0 0 10px;
+  }
+  .empty {
+    color: var(--text-muted); font-size: 13px; padding: 20px; text-align: center;
+    background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius);
+  }
+
+  .tablewrap { overflow-x: auto; border-radius: var(--radius); }
+  table {
+    width: 100%; border-collapse: collapse; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+  }
+  th, td {
+    text-align: left; padding: 12px; border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  th {
+    font-size: 11px; text-transform: uppercase; color: var(--text-muted);
+    font-weight: 600; letter-spacing: 0.03em;
+  }
+  td.what { max-width: 480px; }
+  .item-name { font-weight: 600; }
+  .item-expl { color: var(--text-muted); font-size: 12.5px; margin-top: 2px; }
+  .item-tech {
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+    color: var(--text-muted); opacity: 0.75; margin-top: 4px;
+    max-width: 460px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .item-tech:hover { white-space: normal; word-break: break-all; }
+  td.meta { font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
+
+  .badge {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  }
+  .badge.ok { background: var(--ok-weak); color: var(--ok); }
+  .badge.warn { background: var(--warn-weak); color: var(--warn); }
+  .badge.danger { background: var(--danger-weak); color: var(--danger); }
+  .badge.neutral { background: var(--accent-weak); color: var(--accent); }
+  .badge.muted { background: var(--muted-weak); color: var(--text-muted); }
+
+  .row-actions { display: flex; gap: 6px; align-items: flex-start; }
+
+  details.menu { position: relative; }
+  details.menu > summary {
+    list-style: none; cursor: pointer; padding: 5px 10px;
+    border: 1px solid var(--border); border-radius: 7px; background: var(--surface);
+    font-weight: 700; color: var(--text-muted); user-select: none;
+  }
+  details.menu > summary::-webkit-details-marker { display: none; }
+  details.menu[open] > summary { background: var(--muted-weak); }
+  .menu-items {
+    position: absolute; right: 0; top: calc(100% + 4px); z-index: 20;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: var(--shadow); min-width: 200px; display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .menu-items button {
+    border: none; border-radius: 0; background: none; text-align: left;
+    padding: 9px 14px; font-size: 13px;
+  }
+  .menu-items button.danger { background: none; border: none; color: var(--danger); }
+  .menu-items .menu-note {
+    padding: 6px 14px; font-size: 11px; color: var(--text-muted);
+    border-top: 1px solid var(--border);
+  }
+
+  footer { text-align: center; color: var(--text-muted); font-size: 12px; padding: 20px; }
+  .refresh-note { color: var(--text-muted); font-size: 12px; }
+  .toast {
+    position: fixed; bottom: 20px; right: 20px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px;
+    box-shadow: var(--shadow); font-size: 13px; max-width: 320px;
+    opacity: 0; transform: translateY(8px);
+    transition: opacity 0.15s, transform 0.15s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🧹 Cleanup Dashboard</h1>
+  <div class="subtitle">Background AI agents and scheduled tasks on this Mac, each explained and assessed. Anything marked <b>review this</b> or <b>suspicious</b> deserves a look.</div>
+</header>
+
+<div class="container">
+  <div class="stats" id="stats"></div>
+
+  <div class="toolbar">
+    <input type="search" id="search" placeholder="Search…">
+    <div class="chips" id="statusChips">
+      <button data-status="all" class="active">All</button>
+      <button data-status="attention">Needs attention</button>
+      <button data-status="bogus">Marked bogus</button>
+      <button data-status="keep">Marked safe</button>
+    </div>
+    <label class="toggle"><input type="checkbox" id="showApple"> Show Apple system agents</label>
+    <span class="refresh-note" id="lastUpdated"></span>
+    <button id="refreshBtn">Refresh</button>
+    <label class="toggle"><input type="checkbox" id="autoRefresh" checked> Auto-refresh</label>
+  </div>
+
+  <section>
+    <h2>Running now</h2>
+    <div id="processesWrap"></div>
+  </section>
+
+  <section>
+    <h2>Scheduled to run automatically</h2>
+    <div id="agentsWrap"></div>
+  </section>
+
+  <section>
+    <h2>Cron jobs</h2>
+    <div id="cronWrap"></div>
+  </section>
+</div>
+
+<footer>Local only — served from 127.0.0.1:8765, nothing leaves this machine. Your safe/bogus marks are saved in review_state.json.</footer>
+<div class="toast" id="toast"></div>
+
+<script>
+const state = { data: null, filter: "", status: "all" };
+let timer = null;
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove("show"), 3000);
+}
+
+function matchesFilter(text) {
+  if (!state.filter) return true;
+  return text.toLowerCase().includes(state.filter);
+}
+
+function matchesStatus(item) {
+  if (state.status === "all") return true;
+  if (state.status === "attention")
+    return !item.review && (item.verdict === "review" || item.verdict === "suspicious");
+  return item.review === state.status;
+}
+
+function searchText(item) {
+  return [item.friendly_name, item.explanation, item.command || item.raw || "",
+          item.label || "", item.type || ""].join(" ");
+}
+
+function visible(item) {
+  return matchesFilter(searchText(item)) && matchesStatus(item);
+}
+
+async function fetchScan() {
+  const showApple = document.getElementById("showApple").checked;
+  const res = await fetch(`/api/scan${showApple ? "?apple=1" : ""}`);
+  state.data = await res.json();
+  render();
+}
+
+async function post(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+// The assessment badge: the user's own mark wins over the automatic verdict.
+function assessmentBadge(item) {
+  let b = item.new ? '<span class="badge warn">NEW</span> ' : "";
+  if (item.review === "keep") return b + '<span class="badge ok">✓ marked safe</span>';
+  if (item.review === "bogus") return b + '<span class="badge danger">✗ marked bogus</span>';
+  const v = item.verdict;
+  if (v === "needed") return b + '<span class="badge neutral">in use — don\'t stop</span>';
+  if (v === "fine") return b + '<span class="badge ok">looks fine</span>';
+  if (v === "suspicious") return b + '<span class="badge danger">suspicious</span>';
+  return b + '<span class="badge warn">review this</span>';
+}
+
+function whatCell(item, tech) {
+  return `
+    <td class="what">
+      <div class="item-name">${esc(item.friendly_name)}</div>
+      <div class="item-expl">${esc(item.explanation)}</div>
+      <div class="item-tech" title="${esc(tech)}">${esc(tech)}</div>
+    </td>`;
+}
+
+// Overflow "⋯" menu. Marking items needs no confirmation; risky extras
+// confirm in the click handler.
+function markItems(item) {
+  const keepOn = item.review === "keep";
+  const bogusOn = item.review === "bogus";
+  return `
+    <button data-act="review" data-id="${esc(item.id)}" data-status="${keepOn ? "clear" : "keep"}">
+      ${keepOn ? "Remove the ‘safe’ mark" : "Mark as safe"}</button>
+    <button data-act="review" data-id="${esc(item.id)}" data-status="${bogusOn ? "clear" : "bogus"}">
+      ${bogusOn ? "Remove the ‘bogus’ mark" : "Mark as bogus"}</button>`;
+}
+
+function overflowMenu(inner, note) {
+  return `
+    <details class="menu">
+      <summary>⋯</summary>
+      <div class="menu-items">${inner}${note ? `<div class="menu-note">${note}</div>` : ""}</div>
+    </details>`;
+}
+
+function renderStats(summary) {
+  const items = [
+    { label: "AI processes running", value: summary.process_count },
+    { label: "Memory held (MB)", value: summary.total_rss_mb },
+    { label: "Scheduled tasks", value: summary.launch_agent_count },
+    { label: "Cron jobs", value: summary.cron_count },
+    { label: "Needs attention", value: summary.needs_review_count },
+    { label: "Marked bogus", value: summary.bogus_count },
+  ];
+  document.getElementById("stats").innerHTML = items.map(i => `
+    <div class="stat-card">
+      <div class="stat-value">${i.value}</div>
+      <div class="stat-label">${i.label}</div>
+    </div>
+  `).join("");
+}
+
+function renderProcesses(list) {
+  const filtered = list.filter(visible);
+  const wrap = document.getElementById("processesWrap");
+  if (filtered.length === 0) {
+    wrap.innerHTML = `<div class="empty">Nothing here matches this filter.</div>`;
+    return;
+  }
+  wrap.innerHTML = `
+    <div class="tablewrap"><table>
+      <thead><tr>
+        <th>What it is</th><th>Assessment</th><th>Details</th><th>Actions</th>
+      </tr></thead>
+      <tbody>
+        ${filtered.map(p => `
+          <tr>
+            ${whatCell(p, p.command)}
+            <td>${assessmentBadge(p)}</td>
+            <td class="meta">running ${esc(p.age_human)}<br>${(p.rss_kb / 1024).toFixed(0)} MB · ${p.cpu_pct.toFixed(1)}% CPU</td>
+            <td class="row-actions">
+              <button class="small danger primary-act" data-act="kill"
+                data-pid="${p.pid}" data-name="${esc(p.friendly_name)}">Stop</button>
+              ${overflowMenu(`
+                ${markItems(p)}
+                <button class="danger" data-act="kill" data-pid="${p.pid}" data-force="1"
+                  data-name="${esc(p.friendly_name)}">Force stop</button>
+              `, "Force stop: only if a normal Stop didn't work")}
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table></div>
+  `;
+}
+
+function agentStatusText(a) {
+  if (a.disabled) return '<span class="badge muted">turned off</span>';
+  const on = a.loaded ? '<span class="badge ok">active</span>' : '<span class="badge muted">waiting</span>';
+  return `${on}<br>${esc(a.schedule)}`;
+}
+
+function renderAgents(list) {
+  const filtered = list.filter(visible);
+  const wrap = document.getElementById("agentsWrap");
+  if (filtered.length === 0) {
+    wrap.innerHTML = `<div class="empty">Nothing here matches this filter.</div>`;
+    return;
+  }
+  wrap.innerHTML = `
+    <div class="tablewrap"><table>
+      <thead><tr>
+        <th>What it is</th><th>Assessment</th><th>Status &amp; schedule</th><th>Actions</th>
+      </tr></thead>
+      <tbody>
+        ${filtered.map(a => {
+          const name = esc(a.friendly_name);
+          const primary = a.disabled
+            ? `<button class="small primary-act" data-act="agent-enable" data-label="${esc(a.label)}" data-name="${name}">Turn on</button>`
+            : `<button class="small danger primary-act" data-act="agent-disable" data-label="${esc(a.label)}" data-name="${name}">Turn off</button>`;
+          const extras = `
+            ${markItems(a)}
+            ${a.disabled ? "" : `<button data-act="agent-unload" data-label="${esc(a.label)}" data-name="${name}">Pause until next login</button>`}
+            ${a.user_owned ? `<button class="danger" data-act="agent-delete" data-label="${esc(a.label)}" data-name="${name}">Delete permanently</button>` : ""}`;
+          return `
+          <tr>
+            ${whatCell(a, a.label + " — " + a.command)}
+            <td>${assessmentBadge(a)}</td>
+            <td class="meta">${agentStatusText(a)}</td>
+            <td class="row-actions">
+              ${primary}
+              ${overflowMenu(extras, a.user_owned ? "Turn off is reversible; Delete is not" : "System task: needs admin rights to remove fully")}
+            </td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table></div>
+  `;
+}
+
+function renderCron(list) {
+  const filtered = list.filter(visible);
+  const wrap = document.getElementById("cronWrap");
+  if (filtered.length === 0) {
+    wrap.innerHTML = `<div class="empty">No cron jobs — that's normal.</div>`;
+    return;
+  }
+  wrap.innerHTML = `
+    <div class="tablewrap"><table>
+      <thead><tr><th>What it is</th><th>Assessment</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${filtered.map(c => `
+          <tr>
+            ${whatCell(c, c.raw)}
+            <td>${assessmentBadge(c)}</td>
+            <td class="row-actions">
+              <button class="small danger primary-act" data-act="cron-remove" data-index="${c.index}"
+                data-raw="${esc(c.raw)}">Remove</button>
+              ${overflowMenu(markItems(c), "")}
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table></div>
+  `;
+}
+
+function render() {
+  if (!state.data) return;
+  renderStats(state.data.summary);
+  renderProcesses(state.data.processes);
+  renderAgents(state.data.launch_agents);
+  renderCron(state.data.cron_jobs);
+  document.getElementById("lastUpdated").textContent =
+    "Updated " + state.data.generated_at.replace("T", " ");
+}
+
+document.addEventListener("click", async (e) => {
+  // Close any open "⋯" menu when clicking outside it.
+  document.querySelectorAll("details.menu[open]").forEach(d => {
+    if (!d.contains(e.target)) d.open = false;
+  });
+
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  const act = btn.dataset.act;
+  const name = btn.dataset.name || "";
+
+  if (act === "review") {
+    const r = await post("/api/review", { id: btn.dataset.id, status: btn.dataset.status });
+    toast(r.message);
+    fetchScan();
+    return;
+  }
+  if (act === "kill") {
+    const pid = parseInt(btn.dataset.pid, 10);
+    const force = btn.dataset.force === "1";
+    const msg = force
+      ? `Force-stop "${name}"? Use this only if a normal Stop didn't work.`
+      : `Stop "${name}"?`;
+    if (!confirm(msg)) return;
+    const r = await post("/api/process/kill", { pid, force });
+    toast(r.message);
+    fetchScan();
+    return;
+  }
+  if (act === "agent-disable") {
+    if (!confirm(`Turn off "${name}"? It won't run again until you turn it back on. This is reversible.`)) return;
+    const r = await post("/api/launchagent/disable", { label: btn.dataset.label });
+    toast(r.message);
+    fetchScan();
+    return;
+  }
+  if (act === "agent-enable") {
+    if (!confirm(`Turn "${name}" back on?`)) return;
+    const r = await post("/api/launchagent/enable", { label: btn.dataset.label });
+    toast(r.message);
+    fetchScan();
+    return;
+  }
+  if (act === "agent-unload") {
+    if (!confirm(`Pause "${name}"? It stops for now but comes back the next time you log in.`)) return;
+    const r = await post("/api/launchagent/unload", { label: btn.dataset.label });
+    toast(r.message);
+    fetchScan();
+    return;
+  }
+  if (act === "agent-delete") {
+    if (!confirm(`Delete "${name}" permanently? This cannot be undone from here. If unsure, use Turn off instead.`)) return;
+    const r = await post("/api/launchagent/delete", { label: btn.dataset.label });
+    toast(r.message);
+    fetchScan();
+    return;
+  }
+  if (act === "cron-remove") {
+    if (!confirm(`Remove this scheduled command?\n\n${btn.dataset.raw}`)) return;
+    const r = await post("/api/cron/remove", { index: btn.dataset.index * 1 });
+    toast(r.message);
+    fetchScan();
+    return;
+  }
+});
+
+document.getElementById("search").addEventListener("input", (e) => {
+  state.filter = e.target.value.toLowerCase();
+  render();
+});
+document.getElementById("statusChips").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-status]");
+  if (!btn) return;
+  state.status = btn.dataset.status;
+  document.querySelectorAll("#statusChips button").forEach(b =>
+    b.classList.toggle("active", b === btn));
+  render();
+});
+document.getElementById("showApple").addEventListener("change", fetchScan);
+document.getElementById("refreshBtn").addEventListener("click", fetchScan);
+document.getElementById("autoRefresh").addEventListener("change", (e) => {
+  if (e.target.checked) startAuto(); else clearInterval(timer);
+});
+
+function startAuto() {
+  clearInterval(timer);
+  timer = setInterval(() => {
+    // Don't refresh (and re-render) while a "⋯" menu is open.
+    if (document.querySelector("details.menu[open]")) return;
+    fetchScan();
+  }, 15000);
+}
+
+fetchScan();
+startAuto();
+</script>
+</body>
+</html>
