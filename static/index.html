@@ -389,14 +389,17 @@ function renderProcesses(list) {
           <tr>
             ${whatCell(p, p.command)}
             <td>${assessmentBadge(p)}</td>
-            <td class="meta">running ${esc(p.age_human)}<br>${(p.rss_kb / 1024).toFixed(0)} MB · ${p.cpu_pct.toFixed(1)}% CPU</td>
+            <td class="meta">running ${esc(p.age_human)}<br>${(p.rss_kb / 1024).toFixed(0)} MB · ${p.cpu_pct.toFixed(1)}% CPU${
+              p.restart_name ? `<br><span style="color: var(--warn)">restarted by ${esc(p.restart_name)}</span>` : ""}</td>
             <td class="row-actions">
               <button class="small danger primary-act" data-act="kill"
-                data-pid="${p.pid}" data-name="${esc(p.friendly_name)}">Stop</button>
+                data-pid="${p.pid}" data-name="${esc(p.friendly_name)}"
+                data-restart-name="${esc(p.restart_name || "")}">Stop</button>
               ${overflowMenu(`
                 ${markItems(p)}
                 <button class="danger" data-act="kill" data-pid="${p.pid}" data-force="1"
-                  data-name="${esc(p.friendly_name)}">Force stop</button>
+                  data-name="${esc(p.friendly_name)}"
+                  data-restart-name="${esc(p.restart_name || "")}">Force stop</button>
               `, "Force stop: only if a normal Stop didn't work")}
             </td>
           </tr>
@@ -539,9 +542,16 @@ document.addEventListener("click", async (e) => {
   if (act === "kill") {
     const pid = parseInt(btn.dataset.pid, 10);
     const force = btn.dataset.force === "1";
+    // Killing a process is only permanent if nothing is waiting to relaunch
+    // it. Say who that is instead of letting the click imply "gone for good".
+    const who = btn.dataset.restartName;
+    const tail = who
+      ? `\n\nThis will come back: ${who} starts it. To stop it for good, quit `
+        + `${who} or switch off its background item in the list below.`
+      : `\n\nNothing here is set to restart it, but an app may start it again.`;
     const msg = force
-      ? `Force-stop "${name}"? Use this only if a normal Stop didn't work.`
-      : `Stop "${name}"?`;
+      ? `Force-stop "${name}"? Use this only if a normal Stop didn't work.${tail}`
+      : `Stop "${name}"?${tail}`;
     if (!confirm(msg)) return;
     const r = await post("/api/process/kill", { pid, force });
     if (!r) return;

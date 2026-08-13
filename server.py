@@ -420,6 +420,21 @@ AGENT_KNOWLEDGE = (
      "Emergency notification client, usually installed by a university or employer."),
     ("com.logi", "Logitech device software", "fine",
      "Supports Logitech mice, keyboards, and webcams."),
+    ("com.ollama", "Ollama — local AI models", "review",
+     "Starts Ollama's model server in the background. Fine if you use local "
+     "AI; it's holding memory for nothing if you don't."),
+    ("com.docker", "Docker helper", "fine",
+     "Starts Docker Desktop's background helper."),
+    ("io.tailscale", "Tailscale VPN helper", "fine",
+     "Keeps you connected to your Tailscale network."),
+    ("com.anthropic.claudefordesktop", "Claude desktop updater", "fine",
+     "Installs updates for the Claude desktop app."),
+    ("app.monitorcontrol", "MonitorControl helper", "fine",
+     "Lets MonitorControl change external display brightness."),
+    ("nkujuxuj3b.com.nextcloud", "Nextcloud Finder extension", "fine",
+     "Shows sync badges on files in Finder."),
+    ("com.openssh.ssh-agent", "SSH key agent", "fine",
+     "Holds your unlocked SSH keys. Part of macOS's own ssh setup."),
 )
 
 
@@ -500,11 +515,58 @@ def get_exe_paths():
     return paths
 
 
+def find_restarter(pid, parents, launchd_pids):
+    """Walk up from a process to whatever would start it again.
+
+    Killing a process only sticks if nothing is waiting to relaunch it, and
+    almost nothing here runs on its own: the AI backends are children of an
+    editor, the model server is a child of its app. Returns (kind, name):
+    kind is "app" when a running application owns it, "launchd" when a
+    background job does, or None when nothing obvious would bring it back.
+    """
+    seen = set()
+    cur = pid
+    while cur and cur > 1 and cur not in seen:
+        seen.add(cur)
+        label = launchd_pids.get(cur)
+        if label and cur != pid:
+            if label.startswith("application."):
+                # Launch Services registration for an open GUI app.
+                app = launchd_pids.get(cur, "")
+                return "app", _app_name_from(parents.get(cur, ("", ""))[1])
+            return "launchd", label
+        parent = parents.get(cur)
+        if not parent:
+            return None, None
+        ppid, comm = parent
+        if cur != pid and ".app/Contents/MacOS/" in comm:
+            return "app", _app_name_from(comm)
+        cur = ppid
+    return None, None
+
+
+def _app_name_from(command):
+    m = re.search(r"/([^/]+)\.app/", command or "")
+    return m.group(1) if m else (command or "").split("/")[-1]
+
+
 def get_processes():
     proc = run(["ps", "-eo", "pid,ppid,etime,pcpu,rss,command"])
     if proc is None or proc.returncode != 0:
         return []
     exe_paths = get_exe_paths()
+    parents = {}
+    for line in proc.stdout.splitlines()[1:]:
+        f = line.split(None, 5)
+        if len(f) == 6 and f[0].isdigit():
+            parents[int(f[0])] = (int(f[1]), f[5])
+    launchd_pids = {}
+    lc = run(["launchctl", "list"])
+    if lc is not None and lc.returncode == 0:
+        for line in lc.stdout.splitlines()[1:]:
+            cols = line.split("\t")
+            if len(cols) >= 3 and cols[0].isdigit():
+                launchd_pids[int(cols[0])] = cols[2]
     lines = proc.stdout.splitlines()[1:]
     now = datetime.now()
     results = []
@@ -526,8 +588,11 @@ def get_processes():
         started = now - timedelta(seconds=age_seconds)
         exe = exe_paths.get(int(pid), command.split(None, 1)[0])
         friendly, verdict, explanation = assess_process(ptype, command)
+        restart_kind, restart_name = find_restarter(int(pid), parents, launchd_pids)
         results.append({
             "id": "proc:" + exe,
+            "restart_kind": restart_kind,
+            "restart_name": restart_name,
             "friendly_name": friendly,
             "verdict": verdict,
             "explanation": explanation,
@@ -641,6 +706,64 @@ def get_disabled_labels():
     return disabled, True
 
 
+def get_background_items(overridden, plist_labels):
+    """Background items apps register with launchd through SMAppService.
+
+    These are the ones System Settings calls "Allow in the Background". They
+    have no plist in any folder this scans because they live inside the app
+    bundle, which makes them invisible here and, since they restart at login,
+    the usual reason something you stopped is back the next day. launchctl
+    still knows them, and a per-user override still switches them off.
+    """
+    proc = run(["launchctl", "list"])
+    if proc is None or proc.returncode != 0:
+        return []
+    live = {}
+    for line in proc.stdout.splitlines()[1:]:
+        cols = line.split("\t")
+        if len(cols) >= 3:
+            live[cols[2]] = cols[0]
+    # launchd drops a disabled job from `list` entirely, so enumerating only
+    # from there loses the row the moment it's switched off, leaving no way
+    # to switch it back on. The override database remembers it.
+    candidates = list(live) + [l for l in overridden if l not in live]
+    results = []
+    for label in candidates:
+        pid_s = live.get(label, "-")
+        if label in plist_labels or label.startswith("com.apple."):
+            continue
+        # "application.*" entries are just GUI apps that happen to be open,
+        # registered by Launch Services; they aren't background items.
+        if label.startswith("application."):
+            continue
+        friendly, verdict, explanation = assess_agent(label, label, user_owned=True)
+        disabled = label in overridden
+        results.append({
+            "id": "bgitem:" + label,
+            "friendly_name": friendly,
+            "verdict": verdict,
+            "explanation": explanation + " Registered by an app rather than by a "
+                           "file, so it starts again at login until it's blocked.",
+            "label": label,
+            "plist_path": "(registered by an app, no file on disk)",
+            "user_owned": False,
+            "command": "(inside the app's own bundle)",
+            "schedule": "at login, and whenever the app asks for it",
+            "disabled": disabled,
+            "renamed": False,
+            "overridden": disabled,
+            "label_from_plist": True,
+            "inert": False,
+            "protected": protected_kind(label),
+            "shared_with": "",
+            "loaded": pid_s != "-",
+            "pid": int(pid_s) if pid_s.isdigit() else None,
+            "ai_related": any(kw in label.lower() for kw in AI_KEYWORDS),
+            "app_registered": True,
+        })
+    return results
+
+
 def get_launch_agents(override_state=None):
     loaded = get_loaded_labels()
     # Take the caller's reading of the override database when there is one,
@@ -742,6 +865,8 @@ def get_launch_agents(override_state=None):
             if parent not in dirs_:
                 dirs_.append(parent)
         r["shared_with"] = " and ".join(dirs_) if (dirs_ and not r["user_owned"]) else ""
+        r["app_registered"] = False
+    results.extend(get_background_items(overridden, set(by_label)))
     results.sort(key=lambda r: (not r["ai_related"], r["label"]))
     return results
 
@@ -836,7 +961,7 @@ def _find_agent(item_id):
     """Resolve the exact row the page was showing. Matching on the id rather
     than the label matters when the same label exists in both ~/Library and
     /Library: acting on one row used to rename the other directory's file."""
-    if not isinstance(item_id, str) or not item_id.startswith("agent:"):
+    if not isinstance(item_id, str) or not item_id.startswith(("agent:", "bgitem:")):
         return None
     agents = [a for a in get_launch_agents() if a["id"] == item_id]
     if not agents:
@@ -973,6 +1098,11 @@ def enable_launch_agent(item_id):
             if shared:
                 also = f"; the copy in {_name_dirs(shared)} shares this name and is on again too"
 
+    # An app-registered item has no file to restore or bootstrap; clearing
+    # the block is the whole job, and the app puts it back itself.
+    if agent.get("app_registered"):
+        return True, "turned back on; the app will start it again at login"
+
     path = Path(agent["plist_path"])
     if path.name.endswith(DISABLED_SUFFIX):
         if not agent["user_owned"]:
@@ -1002,6 +1132,9 @@ def delete_launch_agent(item_id):
     agent = _find_agent(item_id)
     if not agent:
         return False, "not found in current scan (refusing to act)"
+    if agent.get("app_registered"):
+        return False, ("this one lives inside an app, so there's no file to delete; "
+                       "Turn off blocks it instead")
     if not agent["user_owned"]:
         return False, "refusing to delete a system-owned plist (needs sudo)"
     if not agent["inert"]:

@@ -38,6 +38,10 @@ One page, three lists:
 - every LaunchAgent in `~/Library` and `/Library`, including ones already
   switched off (macOS keeps its own in `/System` and `/Library/Apple`,
   neither of which is touched)
+- background items apps register through SMAppService, which have no file
+  anywhere in those folders because they live inside the app bundle. These
+  are what System Settings calls "Allow in the Background", and they're
+  usually the reason something you stopped is running again tomorrow
 - cron jobs
 
 ![The scheduled agents table, showing each agent's schedule in words, its status, and a single Turn off or Turn on button.](docs/screenshots/02-scheduled-agents.png)
@@ -201,6 +205,16 @@ A plist with no `Label` and no program can't be a launchd job at all. Google's
 uninstaller leaves files like that behind, so they're shown as empty leftovers
 with no on/off switch rather than being handed to launchctl under a name
 guessed from the filename.
+
+Stopping a process is a different matter, and the dashboard tries not to
+pretend otherwise. Almost nothing in the process list runs on its own: the
+assistant backends are children of your editor, the model server is a child
+of its app. Killing one of those frees the memory now, and the parent starts
+it again whenever it likes. So each row traces its ancestry to whatever owns
+it and says "restarted by Visual Studio Code" in the row, and the
+confirmation repeats it. To stop something like that for good you turn off
+the background item that starts the app's helper, or quit the app; the
+dashboard can do the first and says so rather than implying a kill is final.
 
 `build_app.sh` wraps all of it in an AppleScript applet: start the server if
 it isn't already up, open the browser, and on quit kill whatever is listening
