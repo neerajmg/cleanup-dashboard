@@ -5,8 +5,9 @@ Scans three things:
   - processes that look like AI agents or agent backends (Claude Code, Codex,
     Ollama, home-grown scripts), skipping OS daemons and Electron helper
     processes, which are noise
-  - non-Apple LaunchAgents, including ones already turned off by renaming
-    the plist to *.plist.disabled
+  - LaunchAgents in ~/Library and /Library, including ones already turned
+    off by renaming the plist to *.plist.disabled (macOS keeps its own in
+    /System and /Library/Apple, which are left alone)
   - crontab entries
 
 Everything seen goes into review_state.json with first/last seen timestamps
@@ -128,6 +129,15 @@ def _save_state(state):
     tmp.replace(STATE_PATH)
 
 
+def _legacy_agent_id(item_id):
+    """Agent ids gained an "@<directory>" suffix once it became clear the
+    same label can live in two folders. Map a current id back to the old
+    form so existing marks and first-seen dates aren't orphaned."""
+    if item_id.startswith("agent:") and "@" in item_id:
+        return item_id.rsplit("@", 1)[0]
+    return None
+
+
 def record_sightings(item_ids):
     """Update first/last-seen for the given ids; return (reviews, new_ids)."""
     now = datetime.now()
@@ -139,7 +149,12 @@ def record_sightings(item_ids):
         )
         sightings = state["sightings"]
         for iid in item_ids:
-            entry = sightings.setdefault(iid, {"first_seen": now_s})
+            entry = sightings.get(iid)
+            if entry is None:
+                legacy = _legacy_agent_id(iid)
+                seed = sightings.get(legacy) if legacy else None
+                entry = {"first_seen": seed["first_seen"] if seed else now_s}
+                sightings[iid] = entry
             entry["last_seen"] = now_s
         # prune sightings (but never reviewed items) not seen in a long time
         cutoff = now - PRUNE_AFTER
@@ -188,6 +203,9 @@ def set_review(item_id, status):
 def attach_review(items, reviews, new_ids):
     for it in items:
         review = reviews.get(it["id"])
+        if review is None:
+            legacy = _legacy_agent_id(it["id"])
+            review = reviews.get(legacy) if legacy else None
         it["review"] = review["status"] if review else None
         it["new"] = it["id"] in new_ids
 
@@ -342,20 +360,32 @@ AGENT_KNOWLEDGE = (
 
 def assess_agent(label, command, user_owned):
     lower_label = label.lower()
-    # macOS keeps its own agents in /System/Library, which this tool never
-    # scans, so an Apple label found here is out of place. Usually installer
-    # residue; occasionally something borrowing the name to look official.
-    if lower_label.startswith("com.apple."):
-        return ("Apple-named task outside the system folders", "review",
-                "Carries an Apple label, but macOS stores its own agents in "
-                "/System/Library, not here. Often left behind by an installer, "
-                "and occasionally software using the name to look official. "
-                "Worth reading the command below before you keep it.")
+    lower_cmd = command.lower()
+    in_temp = any(p in lower_cmd for p in ("/tmp/", "/private/tmp", "/downloads/"))
+
     for prefix, name, verdict, expl in AGENT_KNOWLEDGE:
         if lower_label.startswith(prefix):
             return (name, verdict, expl)
-    lower_cmd = command.lower()
-    if any(p in lower_cmd for p in ("/tmp/", "/private/tmp", "/downloads/")):
+
+    # Apple's own agents live in /System and /Library/Apple, neither of which
+    # this scans, so an Apple label in the folders it does scan is out of
+    # place. Usually installer residue; borrowing the name is also an old
+    # malware trick (EvilQuest persisted as com.apple.questd). Must stay
+    # above the temp-folder rule only in the sense that it escalates with it:
+    # an Apple name is a reason to worry more, never less.
+    if lower_label.startswith("com.apple."):
+        if in_temp:
+            return ("Apple-named task run from a temporary folder", "suspicious",
+                    "Uses an Apple label and runs from a temporary or downloads "
+                    "folder, where neither Apple nor any other real software "
+                    "keeps anything. Turn it off unless you put it there.")
+        return ("Apple-named task in a non-Apple folder", "review",
+                "Uses an Apple label, but macOS keeps its own agents in /System "
+                "and /Library/Apple, which this scan doesn't read. Usually "
+                "left behind by an installer. Read the command below before "
+                "deciding.")
+
+    if in_temp:
         return ("Unrecognized scheduled task (temporary folder)", "suspicious",
                 "Scheduled to run a program from a temporary or downloads folder — "
                 "legitimate software rarely does this. Turn it off unless you know it.")
@@ -535,7 +565,6 @@ def get_launch_agents():
                 continue
             fallback = f.name[:-len(DISABLED_SUFFIX)] if disabled else f.stem
             label = plist.get("Label", fallback)
-            is_apple = label.startswith("com.apple.")
             prog_args = plist.get("ProgramArguments")
             program = plist.get("Program")
             if prog_args:
@@ -550,7 +579,13 @@ def get_launch_agents():
             user_owned = str(d).startswith(str(Path.home()))
             friendly, verdict, explanation = assess_agent(label, command, user_owned)
             results.append({
-                "id": "agent:" + label,
+                # Directory in the id: the same label can exist in both
+                # ~/Library and /Library, and without it the two rows share
+                # review marks and actions land on whichever was scanned
+                # first. The filename is deliberately not part of the id, so
+                # turning an agent off (which renames it .disabled) doesn't
+                # orphan its history.
+                "id": "agent:" + label + "@" + str(d),
                 "friendly_name": friendly,
                 "verdict": verdict,
                 "explanation": explanation,
@@ -562,7 +597,6 @@ def get_launch_agents():
                 "disabled": disabled,
                 "loaded": info is not None,
                 "pid": info["pid"] if info else None,
-                "apple": is_apple,
                 "ai_related": ai_related,
             })
     results.sort(key=lambda r: (not r["ai_related"], r["label"]))
@@ -603,16 +637,14 @@ def build_scan():
     for group in (processes, launch_agents, cron_jobs):
         attach_review(group, reviews, new_ids)
 
-    # Needs attention = flagged by the auto-assessment and not yet marked
-    # safe/bogus by the user.
+    # Count from the verdicts attach_review() just resolved, not from a
+    # second lookup: the two disagreed once ids changed shape, so the tiles
+    # read zero while the rows below them showed badges.
     needs_review = sum(
         1 for it in all_items
-        if reviews.get(it["id"]) is None and it["verdict"] in ("review", "suspicious")
+        if it["review"] is None and it["verdict"] in ("review", "suspicious")
     )
-    bogus = sum(
-        1 for it in all_items
-        if (reviews.get(it["id"]) or {}).get("status") == "bogus"
-    )
+    bogus = sum(1 for it in all_items if it["review"] == "bogus")
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "processes": processes,
@@ -633,9 +665,6 @@ def build_scan():
 # Actions — each re-validates its target against a fresh scan first
 # ---------------------------------------------------------------------------
 
-LABEL_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
-
-
 def kill_process(pid, force=False):
     if not isinstance(pid, int) or pid <= 1:
         return False, "invalid pid"
@@ -651,10 +680,13 @@ def kill_process(pid, force=False):
     return True, "killed"
 
 
-def _find_agent(label):
-    if not LABEL_RE.match(label or ""):
+def _find_agent(item_id):
+    """Resolve the exact row the page was showing. Matching on the id rather
+    than the label matters when the same label exists in both ~/Library and
+    /Library: acting on one row used to rename the other directory's file."""
+    if not isinstance(item_id, str) or not item_id.startswith("agent:"):
         return None
-    agents = [a for a in get_launch_agents() if a["label"] == label]
+    agents = [a for a in get_launch_agents() if a["id"] == item_id]
     if not agents:
         return None
     # Prefer the enabled entry if both an enabled and a disabled copy exist.
@@ -672,23 +704,23 @@ def _bootout(label):
     return ok, (proc.stderr.strip() if proc else "launchctl failed")
 
 
-def unload_launch_agent(label):
-    agent = _find_agent(label)
+def unload_launch_agent(item_id):
+    agent = _find_agent(item_id)
     if not agent:
         return False, "not found in current scan (refusing to act)"
-    ok, err = _bootout(label)
+    ok, err = _bootout(agent["label"])
     return ok, ("unloaded (will return at next login unless disabled)" if ok else err)
 
 
-def disable_launch_agent(label):
+def disable_launch_agent(item_id):
     """Unload now AND rename the plist to *.plist.disabled so it can't come
     back at next login. Reversible via enable."""
-    agent = _find_agent(label)
+    agent = _find_agent(item_id)
     if not agent:
         return False, "not found in current scan (refusing to act)"
     if agent["disabled"]:
         return True, "already disabled"
-    ok, err = _bootout(label)
+    ok, err = _bootout(agent["label"])
     if not ok:
         return False, err
     if not agent["user_owned"]:
@@ -701,8 +733,8 @@ def disable_launch_agent(label):
     return True, "disabled (unloaded + plist renamed)"
 
 
-def enable_launch_agent(label):
-    agent = _find_agent(label)
+def enable_launch_agent(item_id):
+    agent = _find_agent(item_id)
     if not agent:
         return False, "not found in current scan (refusing to act)"
     if not agent["disabled"]:
@@ -723,13 +755,13 @@ def enable_launch_agent(label):
     return True, "enabled and loaded"
 
 
-def delete_launch_agent(label):
-    agent = _find_agent(label)
+def delete_launch_agent(item_id):
+    agent = _find_agent(item_id)
     if not agent:
         return False, "not found in current scan (refusing to act)"
     if not agent["user_owned"]:
         return False, "refusing to delete a system-owned plist (needs sudo)"
-    ok, err = _bootout(label)
+    ok, err = _bootout(agent["label"])
     if not ok:
         return False, err
     try:
@@ -851,22 +883,22 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/launchagent/unload":
-            ok, msg = unload_launch_agent(data.get("label"))
+            ok, msg = unload_launch_agent(data.get("id"))
             self._send_json({"ok": ok, "message": msg})
             return
 
         if parsed.path == "/api/launchagent/disable":
-            ok, msg = disable_launch_agent(data.get("label"))
+            ok, msg = disable_launch_agent(data.get("id"))
             self._send_json({"ok": ok, "message": msg})
             return
 
         if parsed.path == "/api/launchagent/enable":
-            ok, msg = enable_launch_agent(data.get("label"))
+            ok, msg = enable_launch_agent(data.get("id"))
             self._send_json({"ok": ok, "message": msg})
             return
 
         if parsed.path == "/api/launchagent/delete":
-            ok, msg = delete_launch_agent(data.get("label"))
+            ok, msg = delete_launch_agent(data.get("id"))
             self._send_json({"ok": ok, "message": msg})
             return
 

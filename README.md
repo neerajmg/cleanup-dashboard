@@ -36,7 +36,8 @@ One page, three lists:
 
 - processes running now that look like AI agents or agent backends
 - every LaunchAgent in `~/Library` and `/Library`, including ones already
-  switched off (macOS keeps its own in `/System`, which is left alone)
+  switched off (macOS keeps its own in `/System` and `/Library/Apple`,
+  neither of which is touched)
 - cron jobs
 
 ![The scheduled agents table, showing each agent's schedule in words, its status, and a single Turn off or Turn on button.](docs/screenshots/02-scheduled-agents.png)
@@ -169,9 +170,10 @@ The verdicts come from a lookup table of known vendors plus a few fallback
 rules. A scheduled task running a script out of your home directory is
 probably yours, so it gets flagged for review rather than assumed safe.
 Something running from `/tmp` or Downloads gets called suspicious, because
-real software almost never lives there. An agent carrying an Apple label gets
-flagged as well, since macOS keeps its own in `/System` and nothing else has
-a good reason to borrow the name. No model is involved anywhere in this;
+real software almost never lives there. An agent carrying an Apple label is
+flagged too: Apple's own live in `/System` and `/Library/Apple`, so one in
+the folders this does scan is either installer residue or something using
+the name to look official, and it's worth knowing which. No model is involved anywhere in this;
 it's a table and some `if` statements, which is also why it runs instantly and
 works offline.
 

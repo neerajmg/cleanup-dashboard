@@ -422,15 +422,15 @@ function renderAgents(list) {
         ${filtered.map(a => {
           const name = esc(a.friendly_name);
           const primary = a.disabled
-            ? `<button class="small primary-act" data-act="agent-enable" data-label="${esc(a.label)}" data-name="${name}">Turn on</button>`
-            : `<button class="small danger primary-act" data-act="agent-disable" data-label="${esc(a.label)}" data-name="${name}">Turn off</button>`;
+            ? `<button class="small primary-act" data-act="agent-enable" data-id="${esc(a.id)}" data-name="${name}">Turn on</button>`
+            : `<button class="small danger primary-act" data-act="agent-disable" data-id="${esc(a.id)}" data-name="${name}">Turn off</button>`;
           const extras = `
             ${markItems(a)}
-            ${a.disabled ? "" : `<button data-act="agent-unload" data-label="${esc(a.label)}" data-name="${name}">Pause until next login</button>`}
-            ${a.user_owned ? `<button class="danger" data-act="agent-delete" data-label="${esc(a.label)}" data-name="${name}">Delete permanently</button>` : ""}`;
+            ${a.disabled ? "" : `<button data-act="agent-unload" data-id="${esc(a.id)}" data-name="${name}">Pause until next login</button>`}
+            ${a.user_owned ? `<button class="danger" data-act="agent-delete" data-id="${esc(a.id)}" data-name="${name}">Delete permanently</button>` : ""}`;
           return `
           <tr>
-            ${whatCell(a, a.label + " — " + a.command)}
+            ${whatCell(a, a.label + " — " + a.plist_path + " — " + a.command)}
             <td>${assessmentBadge(a)}</td>
             <td class="meta">${agentStatusText(a)}</td>
             <td class="row-actions">
@@ -514,7 +514,7 @@ document.addEventListener("click", async (e) => {
   }
   if (act === "agent-disable") {
     if (!confirm(`Turn off "${name}"? It won't run again until you turn it back on. This is reversible.`)) return;
-    const r = await post("/api/launchagent/disable", { label: btn.dataset.label });
+    const r = await post("/api/launchagent/disable", { id: btn.dataset.id });
     if (!r) return;
     toast(r.message);
     fetchScan();
@@ -522,7 +522,7 @@ document.addEventListener("click", async (e) => {
   }
   if (act === "agent-enable") {
     if (!confirm(`Turn "${name}" back on?`)) return;
-    const r = await post("/api/launchagent/enable", { label: btn.dataset.label });
+    const r = await post("/api/launchagent/enable", { id: btn.dataset.id });
     if (!r) return;
     toast(r.message);
     fetchScan();
@@ -530,7 +530,7 @@ document.addEventListener("click", async (e) => {
   }
   if (act === "agent-unload") {
     if (!confirm(`Pause "${name}"? It stops for now but comes back the next time you log in.`)) return;
-    const r = await post("/api/launchagent/unload", { label: btn.dataset.label });
+    const r = await post("/api/launchagent/unload", { id: btn.dataset.id });
     if (!r) return;
     toast(r.message);
     fetchScan();
@@ -538,7 +538,7 @@ document.addEventListener("click", async (e) => {
   }
   if (act === "agent-delete") {
     if (!confirm(`Delete "${name}" permanently? This cannot be undone from here. If unsure, use Turn off instead.`)) return;
-    const r = await post("/api/launchagent/delete", { label: btn.dataset.label });
+    const r = await post("/api/launchagent/delete", { id: btn.dataset.id });
     if (!r) return;
     toast(r.message);
     fetchScan();
