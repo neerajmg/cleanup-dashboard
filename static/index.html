@@ -198,7 +198,6 @@
       <button data-status="bogus">Marked bogus</button>
       <button data-status="keep">Marked safe</button>
     </div>
-    <label class="toggle"><input type="checkbox" id="showApple"> Show Apple system agents</label>
     <span class="refresh-note" id="lastUpdated"></span>
     <button id="refreshBtn">Refresh</button>
     <label class="toggle"><input type="checkbox" id="autoRefresh" checked> Auto-refresh</label>
@@ -291,10 +290,7 @@ function visible(item) {
 }
 
 async function fetchScan() {
-  const showApple = document.getElementById("showApple").checked;
-  const res = await fetch(`/api/scan${showApple ? "?apple=1" : ""}`, {
-    headers: authHeaders(),
-  });
+  const res = await fetch("/api/scan", { headers: authHeaders() });
   if (res.status === 403) { showLocked(); return; }
   state.data = await res.json();
   render();
@@ -570,7 +566,6 @@ document.getElementById("statusChips").addEventListener("click", (e) => {
     b.classList.toggle("active", b === btn));
   render();
 });
-document.getElementById("showApple").addEventListener("change", fetchScan);
 document.getElementById("refreshBtn").addEventListener("click", fetchScan);
 document.getElementById("autoRefresh").addEventListener("change", (e) => {
   if (e.target.checked) startAuto(); else clearInterval(timer);

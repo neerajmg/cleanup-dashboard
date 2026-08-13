@@ -342,6 +342,15 @@ AGENT_KNOWLEDGE = (
 
 def assess_agent(label, command, user_owned):
     lower_label = label.lower()
+    # macOS keeps its own agents in /System/Library, which this tool never
+    # scans, so an Apple label found here is out of place. Usually installer
+    # residue; occasionally something borrowing the name to look official.
+    if lower_label.startswith("com.apple."):
+        return ("Apple-named task outside the system folders", "review",
+                "Carries an Apple label, but macOS stores its own agents in "
+                "/System/Library, not here. Often left behind by an installer, "
+                "and occasionally software using the name to look official. "
+                "Worth reading the command below before you keep it.")
     for prefix, name, verdict, expl in AGENT_KNOWLEDGE:
         if lower_label.startswith(prefix):
             return (name, verdict, expl)
@@ -506,7 +515,7 @@ def get_loaded_labels():
 DISABLED_SUFFIX = ".plist.disabled"
 
 
-def get_launch_agents(include_apple=False):
+def get_launch_agents():
     loaded = get_loaded_labels()
     dirs = [
         Path.home() / "Library" / "LaunchAgents",
@@ -527,8 +536,6 @@ def get_launch_agents(include_apple=False):
             fallback = f.name[:-len(DISABLED_SUFFIX)] if disabled else f.stem
             label = plist.get("Label", fallback)
             is_apple = label.startswith("com.apple.")
-            if is_apple and not include_apple:
-                continue
             prog_args = plist.get("ProgramArguments")
             program = plist.get("Program")
             if prog_args:
@@ -586,9 +593,9 @@ def get_cron_jobs():
     return results
 
 
-def build_scan(include_apple=False):
+def build_scan():
     processes = get_processes()
-    launch_agents = get_launch_agents(include_apple=include_apple)
+    launch_agents = get_launch_agents()
     cron_jobs = get_cron_jobs()
 
     all_items = processes + launch_agents + cron_jobs
@@ -647,7 +654,7 @@ def kill_process(pid, force=False):
 def _find_agent(label):
     if not LABEL_RE.match(label or ""):
         return None
-    agents = [a for a in get_launch_agents(include_apple=True) if a["label"] == label]
+    agents = [a for a in get_launch_agents() if a["label"] == label]
     if not agents:
         return None
     # Prefer the enabled entry if both an enabled and a disabled copy exist.
@@ -823,8 +830,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self._token_ok():
                 self._unauthorized()
                 return
-            include_apple = parsed.query == "apple=1"
-            self._send_json(build_scan(include_apple=include_apple))
+            self._send_json(build_scan())
             return
         self.send_response(404)
         self.end_headers()
