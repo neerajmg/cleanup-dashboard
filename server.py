@@ -64,7 +64,7 @@ PRUNE_AFTER = timedelta(days=90)
 AI_KEYWORDS = (
     "claude", "codex", "anthropic", "openai", "chatgpt", "gpt-",
     "ollama", "langchain", "llama.cpp", "copilot", "gemini-cli",
-    "autogpt", "crewai", "mcp-server", "job-agent", "jobagent",
+    "autogpt", "crewai", "mcp-server",
 )
 
 # Real OS-owned paths. Processes here are never flagged even if a keyword
