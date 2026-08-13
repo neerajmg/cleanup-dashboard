@@ -69,6 +69,23 @@ to click as the safe option.
 You can also overrule the dashboard. Mark as safe or Mark as bogus sticks to
 that item and replaces the automatic badge next time you look.
 
+## How it compares
+
+Tools that list this stuff already exist, and it's worth being clear about
+what they do. KnockKnock (Objective-See, free) enumerates more persistence
+locations than this does and checks every binary against VirusTotal; it's the
+right tool for "is this malware?". macOS itself, since Ventura, notifies you
+when software adds a background item and lists them in System Settings,
+though often as a bare developer name with an on/off switch and nothing else.
+EtreCheck writes a diagnostic report you can hand to someone who knows Macs.
+LaunchControl gives launchd experts full control over every job.
+
+What none of them answer is the question this tool is for: what is this
+thing, when does it run, and will anything break if I turn it off. No
+schedule in words, no plain-language identity, no first-seen tracking, no
+cron in the same view. If you suspect malware, run KnockKnock. If you suspect
+your own past self, run this.
+
 ## Install
 
 You need macOS and Python 3. If `python3 --version` prints something, you're
@@ -80,7 +97,10 @@ cd cleanup-dashboard
 python3 server.py
 ```
 
-That serves http://127.0.0.1:8765 and opens it. Ctrl-C stops it.
+That serves http://127.0.0.1:8765 and opens it. Ctrl-C stops it. The printed
+URL carries a one-session token; a tab opened without it shows a locked page,
+so get back in through that URL or the app rather than typing the address by
+hand.
 
 If you'd rather not use the terminal every time:
 
@@ -91,8 +111,10 @@ If you'd rather not use the terminal every time:
 That builds `Cleanup Dashboard.app` into /Applications (or ~/Applications if
 the first isn't writable). Open it like any app, use the dashboard, then quit
 it from the Dock when you're done, which shuts the server down too. It's an
-AppleScript applet with the project path compiled into it, so if you move the
-folder later you need to run `build_app.sh` again.
+AppleScript applet with the project path compiled into it, so run
+`build_app.sh` again whenever you move the folder or pull an update; an app
+built from older code opens the dashboard without the session token and gets
+the locked page.
 
 ## Using it
 
@@ -171,6 +193,17 @@ It's a web page with kill buttons on it, so:
 The server only binds to 127.0.0.1, and it rejects any request whose Host or
 Origin header isn't the dashboard itself. Without that second check a website
 you happened to have open could POST to these endpoints in the background.
+
+Browsers aren't the only thing that can reach a localhost port, though; every
+program on the Mac can. So the server also generates a random token each time
+it starts and refuses any API request that doesn't carry it. The token
+reaches your browser only through the URL the server opens at launch, and is
+never embedded in the served page, which any local process could download.
+This is aimed at sandboxed apps, which can reach the port but not the token
+file. A full-privilege process running as your user can read the token file,
+but it can also call kill and launchctl directly, so the API gives it nothing
+it didn't already have. An earlier version shipped without this check, and a
+sandboxed app could have driven the kill endpoints through it.
 
 Every destructive action re-scans before it does anything and refuses targets
 that aren't in the fresh results. If a PID has been recycled, or a plist moved,

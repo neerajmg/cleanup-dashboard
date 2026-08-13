@@ -15,15 +15,20 @@ NEW badge work.
 
 The HTTP side is deliberately restricted. It binds to localhost, and it drops
 requests whose Host or Origin header isn't this dashboard, otherwise any page
-in your browser could POST to the kill endpoint. Actions re-scan before they
-run and refuse anything not in the fresh results, so a stale PID or a plist
-that moved can't be acted on by mistake.
+in your browser could POST to the kill endpoint. Every /api request must also
+carry a per-session token that only travels through the URL opened at startup,
+because localhost is reachable by every process on the machine, not just
+browsers. Actions re-scan before they run and refuse anything not in the
+fresh results, so a stale PID or a plist that moved can't be acted on by
+mistake.
 """
 
+import atexit
 import json
 import os
 import plistlib
 import re
+import secrets
 import signal
 import subprocess
 import sys
@@ -37,6 +42,15 @@ HOST = "127.0.0.1"
 PORT = 8765
 STATIC_DIR = Path(__file__).parent / "static"
 STATE_PATH = Path(__file__).parent / "review_state.json"
+
+# Per-session secret. Host/Origin checks stop web pages, but any local
+# process can talk to a localhost port, so every /api request must also
+# carry this token. It reaches the browser only through the URL opened at
+# startup (never embedded in the served page, which any process could
+# download), and is written to a 0600 file so the app launcher can build
+# that URL.
+TOKEN = secrets.token_urlsafe(32)
+TOKEN_PATH = Path(__file__).parent / ".session_token"
 
 ALLOWED_HOSTS = {f"{HOST}:{PORT}", f"localhost:{PORT}", HOST, "localhost"}
 ALLOWED_ORIGINS = {f"http://{HOST}:{PORT}", f"http://localhost:{PORT}"}
@@ -764,6 +778,15 @@ class Handler(BaseHTTPRequestHandler):
     def _forbidden(self):
         self._send_json({"ok": False, "message": "forbidden origin"}, status=403)
 
+    def _token_ok(self):
+        supplied = self.headers.get("X-Auth-Token", "")
+        return secrets.compare_digest(supplied, TOKEN)
+
+    def _unauthorized(self):
+        self._send_json(
+            {"ok": False, "message": "missing or bad session token"}, status=403
+        )
+
     def _send_json(self, obj, status=200):
         body = json.dumps(obj).encode()
         self.send_response(status)
@@ -797,6 +820,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         if parsed.path == "/api/scan":
+            if not self._token_ok():
+                self._unauthorized()
+                return
             include_apple = parsed.query == "apple=1"
             self._send_json(build_scan(include_apple=include_apple))
             return
@@ -806,6 +832,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._origin_ok(is_post=True):
             self._forbidden()
+            return
+        if not self._token_ok():
+            self._unauthorized()
             return
         parsed = urlparse(self.path)
         data = self._read_json()
@@ -849,10 +878,29 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+def _write_token_file():
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+    fd = os.open(TOKEN_PATH, flags, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(TOKEN)
+
+    def _cleanup():
+        try:
+            TOKEN_PATH.unlink()
+        except OSError:
+            pass
+    atexit.register(_cleanup)
+
+
 def main():
+    # The app's Quit sends SIGTERM; without this, atexit never runs and the
+    # token file outlives the server it belonged to.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    url = f"http://{HOST}:{PORT}"
-    print(f"Cleanup dashboard running at {url} (Ctrl+C to stop)")
+    _write_token_file()
+    url = f"http://{HOST}:{PORT}/?token={TOKEN}"
+    print(f"Cleanup dashboard running at {url}")
+    print("(the token is this session's key; Ctrl+C to stop)")
     if "--no-browser" not in sys.argv:
         try:
             import webbrowser

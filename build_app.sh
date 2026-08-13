@@ -14,7 +14,8 @@ fi
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-sed "s|__SERVER_SCRIPT__|$PWD/server.py|" launcher.applescript > "$TMP/launcher.applescript"
+sed -e "s|__SERVER_SCRIPT__|$PWD/server.py|" \
+    -e "s|__PROJECT_DIR__|$PWD|" launcher.applescript > "$TMP/launcher.applescript"
 
 rm -rf "$DEST/Cleanup Dashboard.app"
 osacompile -s -o "$DEST/Cleanup Dashboard.app" "$TMP/launcher.applescript"

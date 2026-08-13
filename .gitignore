@@ -2,6 +2,9 @@
 review_state.json
 review_state.json.tmp
 
+# Per-session auth token
+.session_token
+
 # Build artifacts
 *.app/
 __pycache__/

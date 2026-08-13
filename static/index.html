@@ -227,6 +227,34 @@
 const state = { data: null, filter: "", status: "all" };
 let timer = null;
 
+// The session token arrives once via the launch URL (?token=...). Keep it in
+// sessionStorage and scrub it from the address bar so it never lingers
+// anywhere visible. Every API call sends it back as a header.
+(function bootstrapToken() {
+  const fromUrl = new URLSearchParams(location.search).get("token");
+  if (fromUrl) {
+    sessionStorage.setItem("cd-token", fromUrl);
+    history.replaceState(null, "", location.pathname);
+  }
+})();
+const TOKEN = sessionStorage.getItem("cd-token") || "";
+
+function authHeaders(extra) {
+  return Object.assign({ "X-Auth-Token": TOKEN }, extra || {});
+}
+
+function showLocked() {
+  clearInterval(timer);
+  document.querySelector(".container").innerHTML = `
+    <div class="empty" style="margin-top: 24px; padding: 32px;">
+      <b>This tab isn't authorized.</b><br><br>
+      The dashboard only accepts the tab it opened itself, so other software
+      on this Mac can't press its buttons.<br>
+      Open it again from <b>Cleanup Dashboard.app</b>, or use the full URL
+      printed when you started <code>python3 server.py</code>.
+    </div>`;
+}
+
 function esc(s) {
   return String(s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -264,7 +292,10 @@ function visible(item) {
 
 async function fetchScan() {
   const showApple = document.getElementById("showApple").checked;
-  const res = await fetch(`/api/scan${showApple ? "?apple=1" : ""}`);
+  const res = await fetch(`/api/scan${showApple ? "?apple=1" : ""}`, {
+    headers: authHeaders(),
+  });
+  if (res.status === 403) { showLocked(); return; }
   state.data = await res.json();
   render();
 }
@@ -272,9 +303,12 @@ async function fetchScan() {
 async function post(url, body) {
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
+  // Stale token (server restarted since this tab opened): lock the page
+  // instead of toasting a raw auth error after the user already confirmed.
+  if (res.status === 403) { showLocked(); return null; }
   return res.json();
 }
 
@@ -464,6 +498,7 @@ document.addEventListener("click", async (e) => {
 
   if (act === "review") {
     const r = await post("/api/review", { id: btn.dataset.id, status: btn.dataset.status });
+    if (!r) return;
     toast(r.message);
     fetchScan();
     return;
@@ -476,6 +511,7 @@ document.addEventListener("click", async (e) => {
       : `Stop "${name}"?`;
     if (!confirm(msg)) return;
     const r = await post("/api/process/kill", { pid, force });
+    if (!r) return;
     toast(r.message);
     fetchScan();
     return;
@@ -483,6 +519,7 @@ document.addEventListener("click", async (e) => {
   if (act === "agent-disable") {
     if (!confirm(`Turn off "${name}"? It won't run again until you turn it back on. This is reversible.`)) return;
     const r = await post("/api/launchagent/disable", { label: btn.dataset.label });
+    if (!r) return;
     toast(r.message);
     fetchScan();
     return;
@@ -490,6 +527,7 @@ document.addEventListener("click", async (e) => {
   if (act === "agent-enable") {
     if (!confirm(`Turn "${name}" back on?`)) return;
     const r = await post("/api/launchagent/enable", { label: btn.dataset.label });
+    if (!r) return;
     toast(r.message);
     fetchScan();
     return;
@@ -497,6 +535,7 @@ document.addEventListener("click", async (e) => {
   if (act === "agent-unload") {
     if (!confirm(`Pause "${name}"? It stops for now but comes back the next time you log in.`)) return;
     const r = await post("/api/launchagent/unload", { label: btn.dataset.label });
+    if (!r) return;
     toast(r.message);
     fetchScan();
     return;
@@ -504,6 +543,7 @@ document.addEventListener("click", async (e) => {
   if (act === "agent-delete") {
     if (!confirm(`Delete "${name}" permanently? This cannot be undone from here. If unsure, use Turn off instead.`)) return;
     const r = await post("/api/launchagent/delete", { label: btn.dataset.label });
+    if (!r) return;
     toast(r.message);
     fetchScan();
     return;
@@ -511,6 +551,7 @@ document.addEventListener("click", async (e) => {
   if (act === "cron-remove") {
     if (!confirm(`Remove this scheduled command?\n\n${btn.dataset.raw}`)) return;
     const r = await post("/api/cron/remove", { index: btn.dataset.index * 1 });
+    if (!r) return;
     toast(r.message);
     fetchScan();
     return;

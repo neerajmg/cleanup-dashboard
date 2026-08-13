@@ -9,6 +9,7 @@
 
 property serverURL : "http://127.0.0.1:8765"
 property serverScript : "__SERVER_SCRIPT__"
+property tokenFile : "__PROJECT_DIR__/.session_token"
 
 on serverRunning()
 	try
@@ -19,12 +20,36 @@ on serverRunning()
 	end try
 end serverRunning
 
+-- The server writes a per-session token file at startup; API calls without
+-- the token are refused, so the URL we open must carry it.
+on readToken()
+	repeat with attempt from 1 to 4
+		try
+			return do shell script "/bin/cat " & quoted form of tokenFile
+		on error
+			delay 0.5
+		end try
+	end repeat
+	return ""
+end readToken
+
 on startAndOpen()
 	if not serverRunning() then
+		-- A token file from a previous session may survive an unclean stop;
+		-- remove it so readToken() can't grab a stale token before the new
+		-- server writes its own.
+		try
+			do shell script "/bin/rm -f " & quoted form of tokenFile
+		end try
 		do shell script "/usr/bin/nohup /usr/bin/python3 " & quoted form of serverScript & " --no-browser > /dev/null 2>&1 &"
 		delay 1
 	end if
-	open location serverURL
+	set sessionToken to readToken()
+	if sessionToken is "" then
+		open location serverURL
+	else
+		open location serverURL & "/?token=" & sessionToken
+	end if
 end startAndOpen
 
 on run
@@ -41,6 +66,9 @@ end reopen
 on quit
 	try
 		do shell script "/bin/kill $(/usr/sbin/lsof -ti tcp:8765) 2>/dev/null; exit 0"
+	end try
+	try
+		do shell script "/bin/rm -f " & quoted form of tokenFile
 	end try
 	continue quit
 end quit
