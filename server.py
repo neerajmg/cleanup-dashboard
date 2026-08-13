@@ -6,8 +6,10 @@ Scans three things:
     Ollama, home-grown scripts), skipping OS daemons and Electron helper
     processes, which are noise
   - LaunchAgents in ~/Library and /Library, including ones already turned
-    off by renaming the plist to *.plist.disabled (macOS keeps its own in
-    /System and /Library/Apple, which are left alone)
+    off, whether by renaming the plist to *.plist.disabled (what this does
+    to plists you own) or by a launchd override (what it does to the rest,
+    since renaming those needs sudo). macOS keeps its own agents in /System
+    and /Library/Apple, which are left alone.
   - crontab entries
 
 Everything seen goes into review_state.json with first/last seen timestamps
@@ -112,6 +114,7 @@ def _load_state():
             state.setdefault("meta", {})
             state.setdefault("reviews", {})
             state.setdefault("sightings", {})
+            state.setdefault("agent_state", {})
             return state
         except (json.JSONDecodeError, OSError):
             pass
@@ -119,6 +122,7 @@ def _load_state():
         "meta": {"created_at": datetime.now().isoformat(timespec="seconds")},
         "reviews": {},
         "sightings": {},
+        "agent_state": {},
     }
 
 
@@ -158,6 +162,7 @@ def record_sightings(item_ids):
             entry["last_seen"] = now_s
         # prune sightings (but never reviewed items) not seen in a long time
         cutoff = now - PRUNE_AFTER
+        agent_state = state.setdefault("agent_state", {})
         for iid in list(sightings):
             if iid in state["reviews"]:
                 continue
@@ -167,6 +172,11 @@ def record_sightings(item_ids):
                 continue
             if last < cutoff:
                 del sightings[iid]
+                agent_state.pop(iid, None)
+        # remembered load states for items whose sighting is long gone
+        for iid in list(agent_state):
+            if iid not in sightings:
+                agent_state.pop(iid, None)
         _save_state(state)
 
         new_ids = set()
@@ -198,6 +208,22 @@ def set_review(item_id, status):
             }
         _save_state(state)
     return True, ("cleared" if status == "clear" else f"marked {status}")
+
+
+def remember_load_state(item_id, was_loaded):
+    """Note whether an agent was actually running when it was turned off, so
+    turning it back on restores that rather than starting something that had
+    been sitting idle."""
+    with _state_lock:
+        state = _load_state()
+        state.setdefault("agent_state", {})[item_id] = {"was_loaded": bool(was_loaded)}
+        _save_state(state)
+
+
+def recall_load_state(item_id, default=True):
+    with _state_lock:
+        entry = _load_state().get("agent_state", {}).get(item_id)
+    return default if entry is None else entry.get("was_loaded", default)
 
 
 def attach_review(items, reviews, new_ids):
@@ -327,6 +353,45 @@ def assess_process(ptype, command):
             "detail below; stop it if you don't recognize it.")
 
 
+# Software whose job is to protect the person or the fleet: emergency
+# notification, anti-malware, VPN, device management. Switching these off is
+# a decision with consequences past this Mac, and someone reviewing a list of
+# background tasks won't necessarily know that, so the page warns before it
+# lets them.
+PROTECTED_PREFIXES = (
+    ("com.alertus", "emergency alerts"),
+    ("com.rave", "emergency alerts"),
+    ("com.blackboard.connect", "emergency alerts"),
+    ("com.microsoft.wdav", "malware protection"),
+    ("com.microsoft.defender", "malware protection"),
+    ("com.crowdstrike", "malware protection"),
+    ("com.sentinelone", "malware protection"),
+    ("com.sophos", "malware protection"),
+    ("com.mcafee", "malware protection"),
+    ("com.symantec", "malware protection"),
+    ("com.eset", "malware protection"),
+    ("com.google.santa", "malware protection"),
+    ("com.jamf", "device management"),
+    ("com.jamfsoftware", "device management"),
+    ("com.microsoft.intune", "device management"),
+    ("com.airwatch", "device management"),
+    ("com.vmware.hub", "device management"),
+    ("com.apple.managedclient", "device management"),
+    ("com.cisco.anyconnect", "network security"),
+    ("com.paloaltonetworks", "network security"),
+    ("com.zscaler", "network security"),
+)
+
+
+def protected_kind(label):
+    """What this agent protects, if anything, else None."""
+    lower = label.lower()
+    for prefix, kind in PROTECTED_PREFIXES:
+        if lower.startswith(prefix):
+            return kind
+    return None
+
+
 # Known LaunchAgent vendors, matched by label prefix.
 AGENT_KNOWLEDGE = (
     ("com.google.keystone", "Google software updater", "fine",
@@ -365,6 +430,14 @@ def assess_agent(label, command, user_owned):
 
     for prefix, name, verdict, expl in AGENT_KNOWLEDGE:
         if lower_label.startswith(prefix):
+            # A known name doesn't excuse an unknown location: real vendors
+            # don't run their software out of /tmp, so a match there is more
+            # likely something wearing the name than the vendor itself.
+            if in_temp:
+                return (f"{name}, but running from a temporary folder", "suspicious",
+                        "Carries a name this tool recognises, yet runs from a "
+                        "temporary or downloads folder, which the real thing "
+                        "wouldn't. Treat the name as unproven.")
             return (name, verdict, expl)
 
     # Apple's own agents live in /System and /Library/Apple, neither of which
@@ -545,8 +618,34 @@ def get_loaded_labels():
 DISABLED_SUFFIX = ".plist.disabled"
 
 
-def get_launch_agents():
+def get_disabled_labels():
+    """Labels switched off in launchd's per-user override database. This is
+    the only off-switch available for plists you don't own: renaming those
+    needs sudo, while `launchctl disable` is per-user, survives logout, and
+    blocks the agent from loading again.
+
+    Returns (labels, ok). ok is False when launchd couldn't be asked at all
+    (no GUI session, for instance): callers must not read an empty set as
+    "nothing is switched off", or agents that are off would render as on
+    with no way to turn them back on.
+    """
+    uid = os.getuid()
+    proc = run(["launchctl", "print-disabled", f"gui/{uid}"])
+    if proc is None or proc.returncode != 0:
+        return set(), False
+    disabled = set()
+    for line in proc.stdout.splitlines():
+        m = re.match(r'\s*"(.+?)"\s*=>\s*(\S+)', line)
+        if m and m.group(2).lower() in ("disabled", "true"):
+            disabled.add(m.group(1))
+    return disabled, True
+
+
+def get_launch_agents(override_state=None):
     loaded = get_loaded_labels()
+    # Take the caller's reading of the override database when there is one,
+    # so the rows and the "could launchd be asked?" flag can't disagree.
+    overridden, _ok = override_state if override_state else get_disabled_labels()
     dirs = [
         Path.home() / "Library" / "LaunchAgents",
         Path("/Library/LaunchAgents"),
@@ -557,13 +656,18 @@ def get_launch_agents():
             continue
         files = sorted(d.glob("*.plist")) + sorted(d.glob("*" + DISABLED_SUFFIX))
         for f in files:
-            disabled = f.name.endswith(DISABLED_SUFFIX)
+            renamed = f.name.endswith(DISABLED_SUFFIX)
             try:
                 with open(f, "rb") as fh:
                     plist = plistlib.load(fh)
             except Exception:
                 continue
-            fallback = f.name[:-len(DISABLED_SUFFIX)] if disabled else f.stem
+            fallback = f.name[:-len(DISABLED_SUFFIX)] if renamed else f.stem
+            # Some plists carry no Label (Google's uninstaller blanks its
+            # files to {}), so the name is a guess from the filename. That's
+            # fine to display, but it must never be handed to launchctl:
+            # writing an override for a guessed label invents a service.
+            label_from_plist = "Label" in plist
             label = plist.get("Label", fallback)
             prog_args = plist.get("ProgramArguments")
             program = plist.get("Program")
@@ -575,9 +679,28 @@ def get_launch_agents():
                 command = "(no program specified)"
             lower = (label + " " + command).lower()
             ai_related = any(kw in lower for kw in AI_KEYWORDS)
-            info = None if disabled else loaded.get(label)
+            # Two independent ways an agent can be off, and both can be true
+            # at once, so neither can be collapsed into a single "how".
+            overridden_off = label_from_plist and label in overridden
+            disabled = renamed or overridden_off
+            # Report the live load state even for a disabled row. An
+            # override is a load-time gate, not an unload: it can be set
+            # while the service is still bootstrapped and running, and
+            # hiding that made a running agent look stopped.
+            info = loaded.get(label)
             user_owned = str(d).startswith(str(Path.home()))
             friendly, verdict, explanation = assess_agent(label, command, user_owned)
+            # A plist with no name and no program can't be a job: launchd
+            # requires both. These are uninstaller leftovers (Google's blanks
+            # its files to an empty dict). They're inert, so the page offers
+            # no on/off switch for them, and nothing hands launchd a name
+            # that was only ever guessed from the filename.
+            inert = not label_from_plist or command == "(no program specified)"
+            if inert:
+                verdict = "fine"
+                explanation = ("An empty leftover file: it names no service and no "
+                               "program, so it does nothing at all. Safe to delete, "
+                               "safe to ignore.")
             results.append({
                 # Directory in the id: the same label can exist in both
                 # ~/Library and /Library, and without it the two rows share
@@ -595,10 +718,30 @@ def get_launch_agents():
                 "command": command,
                 "schedule": describe_schedule(plist),
                 "disabled": disabled,
+                "renamed": renamed,
+                "overridden": overridden_off,
+                "label_from_plist": label_from_plist,
+                "inert": inert,
+                "protected": protected_kind(label),
                 "loaded": info is not None,
                 "pid": info["pid"] if info else None,
                 "ai_related": ai_related,
             })
+    # A launchd override is keyed on the label alone, so switching off one
+    # row switches off every row sharing that label. Work out who those are
+    # now, so the page can say so in the dialog rather than in a toast after
+    # the fact.
+    by_label = {}
+    for r in results:
+        by_label.setdefault(r["label"], []).append(r)
+    for r in results:
+        others = [o for o in by_label[r["label"]] if o["plist_path"] != r["plist_path"]]
+        dirs_ = []
+        for o in others:
+            parent = str(Path(o["plist_path"]).parent)
+            if parent not in dirs_:
+                dirs_.append(parent)
+        r["shared_with"] = " and ".join(dirs_) if (dirs_ and not r["user_owned"]) else ""
     results.sort(key=lambda r: (not r["ai_related"], r["label"]))
     return results
 
@@ -629,8 +772,10 @@ def get_cron_jobs():
 
 def build_scan():
     processes = get_processes()
-    launch_agents = get_launch_agents()
+    override_state = get_disabled_labels()
+    launch_agents = get_launch_agents(override_state)
     cron_jobs = get_cron_jobs()
+    launchctl_ok = override_state[1]
 
     all_items = processes + launch_agents + cron_jobs
     reviews, new_ids = record_sightings([it["id"] for it in all_items])
@@ -640,9 +785,13 @@ def build_scan():
     # Count from the verdicts attach_review() just resolved, not from a
     # second lookup: the two disagreed once ids changed shape, so the tiles
     # read zero while the rows below them showed badges.
+    # Something already switched off isn't asking for a decision any more,
+    # so it shouldn't keep inflating the count the README tells people to
+    # work down.
     needs_review = sum(
         1 for it in all_items
-        if it["review"] is None and it["verdict"] in ("review", "suspicious")
+        if it["review"] is None and not it.get("disabled")
+        and it["verdict"] in ("review", "suspicious")
     )
     bogus = sum(1 for it in all_items if it["review"] == "bogus")
     return {
@@ -657,6 +806,9 @@ def build_scan():
             "cron_count": len(cron_jobs),
             "needs_review_count": needs_review,
             "bogus_count": bogus,
+            # False when launchd's disabled list couldn't be read, in which
+            # case rows may claim to be on when they aren't.
+            "launchctl_ok": launchctl_ok,
         },
     }
 
@@ -689,9 +841,21 @@ def _find_agent(item_id):
     agents = [a for a in get_launch_agents() if a["id"] == item_id]
     if not agents:
         return None
-    # Prefer the enabled entry if both an enabled and a disabled copy exist.
-    agents.sort(key=lambda a: a["disabled"])
+    # Both a foo.plist and a foo.plist.disabled can sit in the same folder
+    # under one id; prefer the live file. Sorting on "disabled" would tie
+    # when an override is in play, so sort on the rename itself.
+    agents.sort(key=lambda a: a["renamed"])
     return agents[0]
+
+
+def _launchctl(verb, label):
+    uid = os.getuid()
+    proc = run(["launchctl", verb, f"gui/{uid}/{label}"])
+    if proc is None:
+        return False, "launchctl failed"
+    if proc.returncode != 0:
+        return False, (proc.stderr or "").strip() or f"launchctl {verb} failed"
+    return True, ""
 
 
 def _bootout(label):
@@ -708,51 +872,130 @@ def unload_launch_agent(item_id):
     agent = _find_agent(item_id)
     if not agent:
         return False, "not found in current scan (refusing to act)"
-    ok, err = _bootout(agent["label"])
-    return ok, ("unloaded (will return at next login unless disabled)" if ok else err)
-
-
-def disable_launch_agent(item_id):
-    """Unload now AND rename the plist to *.plist.disabled so it can't come
-    back at next login. Reversible via enable."""
-    agent = _find_agent(item_id)
-    if not agent:
-        return False, "not found in current scan (refusing to act)"
-    if agent["disabled"]:
-        return True, "already disabled"
+    if agent["inert"]:
+        return False, INERT_MSG
     ok, err = _bootout(agent["label"])
     if not ok:
         return False, err
+    if agent["disabled"]:
+        return True, "stopped"
+    return True, "stopped for now; it comes back at your next login"
+
+
+INERT_MSG = ("this file names no service and no program, so there's nothing "
+             "to switch on or off; delete it if you want it gone")
+
+
+def _same_label_elsewhere(agent):
+    """Other scanned rows carrying this label. A launchd override is keyed on
+    the label alone, so it covers all of them, and the user needs telling."""
+    return [a for a in get_launch_agents()
+            if a["label"] == agent["label"] and a["plist_path"] != agent["plist_path"]]
+
+
+def _name_dirs(agents):
+    seen = []
+    for a in agents:
+        d = str(Path(a["plist_path"]).parent)
+        if d not in seen:
+            seen.append(d)
+    return " and ".join(seen)
+
+
+def disable_launch_agent(item_id):
+    """Turn an agent off for good, not just until the next login. Renames the
+    plist when it's yours; writes a launchd override when it isn't."""
+    agent = _find_agent(item_id)
+    if not agent:
+        return False, "not found in current scan (refusing to act)"
+    if agent["inert"]:
+        return False, INERT_MSG
+    if agent["disabled"] and not agent["loaded"]:
+        return True, "already turned off"
+
     if not agent["user_owned"]:
-        return True, "unloaded for this session; system-owned plist needs sudo to disable permanently"
+        # Renaming a root-owned plist needs sudo; a launchd override is
+        # per-user, needs none, and unlike bootout it survives logout.
+        # Write the block before unloading: if the unload then fails, the
+        # agent is at least off from the next login rather than fully live.
+        ok, err = _launchctl("disable", agent["label"])
+        if not ok:
+            return False, f"couldn't turn it off: {err}"
+        remember_load_state(item_id, agent["loaded"])
+        booted, boot_err = _bootout(agent["label"])
+        shared = _same_label_elsewhere(agent)
+        extra = (f"; this covers the copy in {_name_dirs(shared)} too" if shared else "")
+        if not booted:
+            return True, f"blocked from starting again, but it's still running ({boot_err}){extra}"
+        return True, f"turned off for your account (stays off after restart){extra}"
+
+    ok, err = _bootout(agent["label"])
+    if not ok:
+        return False, err
     src = Path(agent["plist_path"])
+    if src.name.endswith(DISABLED_SUFFIX):
+        remember_load_state(item_id, agent["loaded"])
+        return True, "turned off"
     try:
         src.rename(src.with_name(src.name + ".disabled"))
     except OSError as e:
         return False, f"unloaded, but rename failed: {e}"
-    return True, "disabled (unloaded + plist renamed)"
+    remember_load_state(item_id, agent["loaded"])
+    return True, "turned off (unloaded and plist renamed)"
 
 
 def enable_launch_agent(item_id):
     agent = _find_agent(item_id)
     if not agent:
         return False, "not found in current scan (refusing to act)"
+    if agent["inert"]:
+        return False, INERT_MSG
     if not agent["disabled"]:
-        return True, "already enabled"
-    if not agent["user_owned"]:
-        return False, "system-owned plist needs sudo to enable"
-    src = Path(agent["plist_path"])
-    dst = src.with_name(src.name[:-len(".disabled")])
-    try:
-        src.rename(dst)
-    except OSError as e:
-        return False, f"rename failed: {e}"
+        return True, "already on"
+
+    # Undo every mechanism that's in play, not just the one recorded: an
+    # agent can be renamed AND overridden, and launchd refuses to bootstrap
+    # a label whose override is still set. A rename-only undo doesn't need
+    # launchd's list at all, so don't fail the whole action when it's the
+    # file that has to move.
+    also = ""
+    if agent["overridden"] or not agent["renamed"]:
+        overridden_now, lookup_ok = get_disabled_labels()
+        if not lookup_ok:
+            return False, ("macOS didn't answer when asked which items are blocked, "
+                           "so nothing was changed")
+        if agent["label"] in overridden_now:
+            ok, err = _launchctl("enable", agent["label"])
+            if not ok:
+                return False, err
+            # Only an override is label-wide; a rename affects one file.
+            shared = _same_label_elsewhere(agent)
+            if shared:
+                also = f"; the copy in {_name_dirs(shared)} shares this name and is on again too"
+
+    path = Path(agent["plist_path"])
+    if path.name.endswith(DISABLED_SUFFIX):
+        if not agent["user_owned"]:
+            return False, "unblocked, but renaming this plist back needs sudo"
+        dst = path.with_name(path.name[:-len(".disabled")])
+        try:
+            path.rename(dst)
+        except OSError as e:
+            return False, f"rename failed: {e}"
+        path = dst
+
+    # Only start it now if it was running when it was turned off. Otherwise
+    # bootstrap would launch something that had merely been sitting there,
+    # which is not what "turn back on" promised.
+    if not recall_load_state(item_id, default=True):
+        return True, f"turned back on; it will start at login as before{also}"
+
     uid = os.getuid()
-    proc = run(["launchctl", "bootstrap", f"gui/{uid}", str(dst)])
+    proc = run(["launchctl", "bootstrap", f"gui/{uid}", str(path)])
     if proc is None or proc.returncode != 0:
         msg = proc.stderr.strip() if proc else "launchctl failed"
-        return True, f"plist restored, but load failed ({msg}); it will load at next login"
-    return True, "enabled and loaded"
+        return True, f"turned back on, but it didn't start now ({msg}){also}"
+    return True, f"turned back on and running{also}"
 
 
 def delete_launch_agent(item_id):
@@ -761,9 +1004,15 @@ def delete_launch_agent(item_id):
         return False, "not found in current scan (refusing to act)"
     if not agent["user_owned"]:
         return False, "refusing to delete a system-owned plist (needs sudo)"
-    ok, err = _bootout(agent["label"])
-    if not ok:
-        return False, err
+    if not agent["inert"]:
+        ok, err = _bootout(agent["label"])
+        if not ok:
+            return False, err
+        # Clear any override too. Left behind, it silently blocks the same
+        # label if the app is reinstalled, with nothing on screen to say why.
+        overridden_now, lookup_ok = get_disabled_labels()
+        if lookup_ok and agent["label"] in overridden_now and not _same_label_elsewhere(agent):
+            _launchctl("enable", agent["label"])
     try:
         Path(agent["plist_path"]).unlink()
     except OSError as e:

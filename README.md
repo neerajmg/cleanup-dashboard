@@ -182,10 +182,25 @@ first/last seen timestamps go into `review_state.json` next to the server,
 along with your safe/bogus marks. That file is gitignored because it describes
 your machine.
 
-Actions are the obvious ones. Stop is SIGTERM, force is SIGKILL. Turn off runs
-`launchctl bootout` and then renames the plist to `.disabled`, because bootout
-on its own only lasts until you next log in, which is exactly the sort of
-half-fix that lets a forgotten agent come back. Turn on reverses both steps.
+Actions are the obvious ones. Stop is SIGTERM, force is SIGKILL. Turn off has
+to do two things, because `launchctl bootout` on its own lasts only until you
+next log in, which is the sort of half-fix that lets a forgotten agent come
+back. For a plist you own (`~/Library/LaunchAgents`) it boots the agent out
+and renames the file to `.disabled`. For one you don't (`/Library/LaunchAgents`,
+put there by some installer) renaming needs sudo, so it writes a
+`launchctl disable` override first and then boots the agent out: that order
+means a failure partway leaves the thing off from next login rather than
+fully live. Turn on undoes whichever mechanisms are in play, and only
+restarts the agent if it was actually running when you turned it off.
+
+One thing can undo an override without you: some installers run
+`launchctl load -w` when the app updates itself, which clears it. If
+something you switched off is running again after an update, that's why.
+
+A plist with no `Label` and no program can't be a launchd job at all. Google's
+uninstaller leaves files like that behind, so they're shown as empty leftovers
+with no on/off switch rather than being handed to launchctl under a name
+guessed from the filename.
 
 `build_app.sh` wraps all of it in an AppleScript applet: start the server if
 it isn't already up, open the browser, and on quit kill whatever is listening
@@ -217,8 +232,18 @@ that aren't in the fresh results. If a PID has been recycled, or a plist moved,
 or the crontab changed since the page loaded, the request fails instead of
 acting on the wrong thing.
 
-Agents under `/Library` are never renamed or deleted; those need `sudo`, and
-this tool doesn't ask for it. It can only unload them for the session.
+Agents under `/Library` are never renamed or deleted; that needs `sudo` and
+this tool doesn't ask for it. To turn one off it writes a `launchctl disable`
+override, which macOS stores in
+`/var/db/com.apple.xpc.launchd/disabled.<uid>.plist`, not in this project.
+That is the one change the tool makes outside its own folder, it applies to
+your account only, and Turn on reverses it. The confirmation dialog says so
+before you click.
+
+Anything that looks like emergency alerts, anti-malware, VPN, or device
+management gets a second confirmation naming what it is, because a list of
+background tasks doesn't make it obvious that the row you're about to switch
+off is how your employer reaches this machine.
 
 Command lines are escaped before they're rendered, on the assumption that a
 process name is attacker-controlled text.

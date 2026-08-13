@@ -144,6 +144,8 @@
   .badge.muted { background: var(--muted-weak); color: var(--text-muted); }
 
   .row-actions { display: flex; gap: 6px; align-items: flex-start; }
+  tr.off { opacity: 0.55; }
+  tr.off .item-name { font-weight: 500; }
 
   details.menu { position: relative; }
   details.menu > summary {
@@ -276,7 +278,8 @@ function matchesFilter(text) {
 function matchesStatus(item) {
   if (state.status === "all") return true;
   if (state.status === "attention")
-    return !item.review && (item.verdict === "review" || item.verdict === "suspicious");
+    return !item.review && !item.disabled
+      && (item.verdict === "review" || item.verdict === "suspicious");
   return item.review === state.status;
 }
 
@@ -313,6 +316,9 @@ function assessmentBadge(item) {
   let b = item.new ? '<span class="badge warn">NEW</span> ' : "";
   if (item.review === "keep") return b + '<span class="badge ok">✓ marked safe</span>';
   if (item.review === "bogus") return b + '<span class="badge danger">✗ marked bogus</span>';
+  // Once something is switched off it isn't asking to be reviewed any more,
+  // so the row shouldn't keep saying "review this" after you've acted.
+  if (item.disabled) return b + '<span class="badge muted">dealt with</span>';
   const v = item.verdict;
   if (v === "needed") return b + '<span class="badge neutral">in use — don\'t stop</span>';
   if (v === "fine") return b + '<span class="badge ok">looks fine</span>';
@@ -401,7 +407,13 @@ function renderProcesses(list) {
 }
 
 function agentStatusText(a) {
-  if (a.disabled) return '<span class="badge muted">turned off</span>';
+  if (a.disabled) {
+    // An override blocks loading but doesn't unload, so an agent can be
+    // switched off and still running. Say so rather than showing "off".
+    return a.loaded
+      ? '<span class="badge warn">turned off, still running</span><br>stops at next login'
+      : '<span class="badge muted">turned off</span>';
+  }
   const on = a.loaded ? '<span class="badge ok">active</span>' : '<span class="badge muted">waiting</span>';
   return `${on}<br>${esc(a.schedule)}`;
 }
@@ -409,11 +421,19 @@ function agentStatusText(a) {
 function renderAgents(list) {
   const filtered = list.filter(visible);
   const wrap = document.getElementById("agentsWrap");
+  // If launchd's disabled list couldn't be read, agents that are switched
+  // off will look switched on, so say so instead of quietly misreporting.
+  const warn = state.data.summary.launchctl_ok === false
+    ? `<div class="empty" style="border-color: var(--warn); color: var(--warn); margin-bottom: 10px;">
+         Couldn't read launchd's disabled list, so anything switched off that
+         way is shown as if it were on.
+       </div>`
+    : "";
   if (filtered.length === 0) {
-    wrap.innerHTML = `<div class="empty">Nothing here matches this filter.</div>`;
+    wrap.innerHTML = warn + `<div class="empty">Nothing here matches this filter.</div>`;
     return;
   }
-  wrap.innerHTML = `
+  wrap.innerHTML = warn + `
     <div class="tablewrap"><table>
       <thead><tr>
         <th>What it is</th><th>Assessment</th><th>Status &amp; schedule</th><th>Actions</th>
@@ -421,15 +441,32 @@ function renderAgents(list) {
       <tbody>
         ${filtered.map(a => {
           const name = esc(a.friendly_name);
-          const primary = a.disabled
-            ? `<button class="small primary-act" data-act="agent-enable" data-id="${esc(a.id)}" data-name="${name}">Turn on</button>`
-            : `<button class="small danger primary-act" data-act="agent-disable" data-id="${esc(a.id)}" data-name="${name}">Turn off</button>`;
+          const idAttr = `data-id="${esc(a.id)}" data-name="${name}"`;
+          const dataBits = `data-owned="${a.user_owned ? 1 : 0}" data-protected="${esc(a.protected || "")}" data-shared="${esc(a.shared_with || "")}"`;
+          const turnOn = `<button data-act="agent-enable" ${idAttr}>Turn on</button>`;
+          const stopNow = `<button class="danger" data-act="agent-unload" ${idAttr} data-off="1">Stop it now</button>`;
+          // An inert leftover has nothing to switch; a switched-off agent that
+          // is still running should offer to finish the job, not to undo it.
+          let primary, extraToggle;
+          if (a.inert) {
+            primary = "";
+            extraToggle = "";
+          } else if (!a.disabled) {
+            primary = `<button class="small danger primary-act" data-act="agent-disable" ${idAttr} ${dataBits}>Turn off</button>`;
+            extraToggle = `<button data-act="agent-unload" ${idAttr}>Pause until next login</button>`;
+          } else if (a.loaded) {
+            primary = `<button class="small danger primary-act" data-act="agent-unload" ${idAttr} data-off="1">Stop it now</button>`;
+            extraToggle = turnOn;
+          } else {
+            primary = `<button class="small primary-act" data-act="agent-enable" ${idAttr}>Turn on</button>`;
+            extraToggle = "";
+          }
           const extras = `
             ${markItems(a)}
-            ${a.disabled ? "" : `<button data-act="agent-unload" data-id="${esc(a.id)}" data-name="${name}">Pause until next login</button>`}
-            ${a.user_owned ? `<button class="danger" data-act="agent-delete" data-id="${esc(a.id)}" data-name="${name}">Delete permanently</button>` : ""}`;
+            ${extraToggle}
+            ${a.user_owned ? `<button class="danger" data-act="agent-delete" ${idAttr}>Delete permanently</button>` : ""}`;
           return `
-          <tr>
+          <tr class="${a.disabled || a.inert ? "off" : ""}">
             ${whatCell(a, a.label + " — " + a.plist_path + " — " + a.command)}
             <td>${assessmentBadge(a)}</td>
             <td class="meta">${agentStatusText(a)}</td>
@@ -513,7 +550,29 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (act === "agent-disable") {
-    if (!confirm(`Turn off "${name}"? It won't run again until you turn it back on. This is reversible.`)) return;
+    const owned = btn.dataset.owned === "1";
+    // Say where the off-switch actually lives. For an item installed for
+    // everyone, the file can't be touched without an admin password, so
+    // macOS keeps the setting for your account instead — worth stating,
+    // since it's outside this folder and invisible afterwards.
+    const how = owned
+      ? `It won't run again until you turn it back on. This is reversible.`
+      : `This was installed for everyone on this Mac, so its file can't be `
+        + `changed without an admin password. Instead macOS is told to stop `
+        + `loading it for your account only. That setting lives in macOS, not `
+        + `in this folder, and Turn on undoes it.`;
+    const shared = btn.dataset.shared
+      ? `\n\nThere is another copy of this in ${btn.dataset.shared}. macOS switches them off together, so both will stop.`
+      : "";
+    if (!confirm(`Turn off "${name}"?\n\n${how}${shared}`)) return;
+    // Software that exists to protect you or your employer's machines gets
+    // a second, blunter question.
+    if (btn.dataset.protected) {
+      if (!confirm(`One more check: "${name}" looks like ${btn.dataset.protected} software, `
+        + `usually installed by an employer or university.\n\n`
+        + `If that's right, turning it off means it stops doing that job on this Mac `
+        + `until you turn it back on. Continue?`)) return;
+    }
     const r = await post("/api/launchagent/disable", { id: btn.dataset.id });
     if (!r) return;
     toast(r.message);
@@ -529,7 +588,12 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (act === "agent-unload") {
-    if (!confirm(`Pause "${name}"? It stops for now but comes back the next time you log in.`)) return;
+    // Same endpoint, two meanings: finishing a turn-off that left something
+    // running, versus a temporary pause on an agent that is still enabled.
+    const msg = btn.dataset.off === "1"
+      ? `Stop "${name}" now? It's already switched off, so it won't come back.`
+      : `Pause "${name}"? It stops for now but comes back the next time you log in.`;
+    if (!confirm(msg)) return;
     const r = await post("/api/launchagent/unload", { id: btn.dataset.id });
     if (!r) return;
     toast(r.message);
