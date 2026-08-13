@@ -11,9 +11,12 @@ property serverURL : "http://127.0.0.1:8765"
 property serverScript : "__SERVER_SCRIPT__"
 property tokenFile : "__PROJECT_DIR__/.session_token"
 
+-- Match only the LISTENing process: a browser tab's open connection to the
+-- dashboard also shows up under tcp:8765, and must be neither counted as
+-- the server nor killed with it.
 on serverRunning()
 	try
-		do shell script "/usr/sbin/lsof -ti tcp:8765"
+		do shell script "/usr/sbin/lsof -ti tcp:8765 -sTCP:LISTEN"
 		return true
 	on error
 		return false
@@ -65,7 +68,7 @@ end reopen
 -- that was started by hand from Terminal.
 on quit
 	try
-		do shell script "/bin/kill $(/usr/sbin/lsof -ti tcp:8765) 2>/dev/null; exit 0"
+		do shell script "/bin/kill $(/usr/sbin/lsof -ti tcp:8765 -sTCP:LISTEN) 2>/dev/null; exit 0"
 	end try
 	try
 		do shell script "/bin/rm -f " & quoted form of tokenFile

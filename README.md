@@ -183,8 +183,10 @@ on its own only lasts until you next log in, which is exactly the sort of
 half-fix that lets a forgotten agent come back. Turn on reverses both steps.
 
 `build_app.sh` wraps all of it in an AppleScript applet: start the server if
-it isn't already up, open the browser, and on quit kill whatever is holding
-port 8765.
+it isn't already up, open the browser, and on quit kill whatever is listening
+on port 8765. Listening specifically: a browser tab with the dashboard open
+holds a connection on the same port, and an earlier version of the quit
+handler would have killed the browser along with the server.
 
 ## Security
 
