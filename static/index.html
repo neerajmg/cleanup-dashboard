@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cleanup Dashboard</title>
+<title>Stowaway</title>
 <style>
   :root {
     --bg: #f6f7f9;
@@ -185,7 +185,7 @@
 </head>
 <body>
 <header>
-  <h1>🧹 Cleanup Dashboard</h1>
+  <h1>🧳 Stowaway</h1>
   <div class="subtitle">Background AI agents and scheduled tasks on this Mac, each explained and assessed. Anything marked <b>review this</b> or <b>suspicious</b> deserves a look.</div>
 </header>
 
@@ -234,11 +234,11 @@ let timer = null;
 (function bootstrapToken() {
   const fromUrl = new URLSearchParams(location.search).get("token");
   if (fromUrl) {
-    sessionStorage.setItem("cd-token", fromUrl);
+    sessionStorage.setItem("stowaway-token", fromUrl);
     history.replaceState(null, "", location.pathname);
   }
 })();
-const TOKEN = sessionStorage.getItem("cd-token") || "";
+const TOKEN = sessionStorage.getItem("stowaway-token") || "";
 
 function authHeaders(extra) {
   return Object.assign({ "X-Auth-Token": TOKEN }, extra || {});
@@ -249,9 +249,9 @@ function showLocked() {
   document.querySelector(".container").innerHTML = `
     <div class="empty" style="margin-top: 24px; padding: 32px;">
       <b>This tab isn't authorized.</b><br><br>
-      The dashboard only accepts the tab it opened itself, so other software
+      Stowaway only accepts the tab it opened itself, so other software
       on this Mac can't press its buttons.<br>
-      Open it again from <b>Cleanup Dashboard.app</b>, or use the full URL
+      Open it again from <b>Stowaway.app</b>, or use the full URL
       printed when you started <code>python3 server.py</code>.
     </div>`;
 }

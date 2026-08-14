@@ -1,10 +1,10 @@
-# Cleanup Dashboard
+# Stowaway
 
-A local web page that lists the AI agents and background jobs running on your
-Mac, tells you what each one actually is, and lets you switch off the ones you
-don't want.
+Stowaway is a local web page that lists the AI agents and background jobs
+running on your Mac, tells you what each one actually is, and lets you switch
+off the ones you don't want.
 
-![The dashboard: summary cards along the top, then a table of running processes. Each row has a name, a description, an assessment badge, memory and CPU figures, and a Stop button.](docs/screenshots/01-overview.png)
+![Stowaway: summary cards along the top, then a table of running processes. Each row has a name, a description, an assessment badge, memory and CPU figures, and a Stop button.](docs/screenshots/01-overview.png)
 
 ## Why I built it
 
@@ -59,7 +59,7 @@ Each item also gets a verdict:
 | review this | Your own scripts, unknown tasks, anything granting remote access |
 | suspicious | Unrecognised *and* running out of a temp or downloads folder |
 
-Anything the dashboard hasn't seen before is flagged NEW for a week, which is
+Anything Stowaway hasn't seen before is flagged NEW for a week, which is
 the case that started all this: a new agent you don't remember creating should
 be hard to miss.
 
@@ -70,7 +70,7 @@ to click as the safe option.
 
 ![An open overflow menu listing Mark as safe, Mark as bogus, Pause until next login, and Delete permanently, with a note saying Turn off is reversible and Delete is not.](docs/screenshots/03-overflow-menu.png)
 
-You can also overrule the dashboard. Mark as safe or Mark as bogus sticks to
+You can also overrule Stowaway. Mark as safe or Mark as bogus sticks to
 that item and replaces the automatic badge next time you look.
 
 ## How it compares
@@ -96,8 +96,8 @@ You need macOS and Python 3. If `python3 --version` prints something, you're
 fine. There's nothing to install beyond that; it's standard library only.
 
 ```bash
-git clone https://github.com/neerajmg/cleanup-dashboard.git
-cd cleanup-dashboard
+git clone https://github.com/neerajmg/stowaway.git
+cd stowaway
 python3 server.py
 ```
 
@@ -112,12 +112,12 @@ If you'd rather not use the terminal every time:
 ./build_app.sh
 ```
 
-That builds `Cleanup Dashboard.app` into /Applications (or ~/Applications if
-the first isn't writable). Open it like any app, use the dashboard, then quit
+That builds `Stowaway.app` into /Applications (or ~/Applications if
+the first isn't writable). Open it like any app, use Stowaway, then quit
 it from the Dock when you're done, which shuts the server down too. It's an
 AppleScript applet with the project path compiled into it, so run
 `build_app.sh` again whenever you move the folder or pull an update; an app
-built from older code opens the dashboard without the session token and gets
+built from older code opens Stowaway without the session token and gets
 the locked page.
 
 ## Using it
@@ -148,7 +148,7 @@ Empty sections say so rather than disappearing:
 
 It follows your system appearance:
 
-![The same dashboard in dark mode.](docs/screenshots/09-dark-mode.png)
+![The same page in dark mode.](docs/screenshots/09-dark-mode.png)
 
 </details>
 
@@ -204,7 +204,7 @@ uninstaller leaves files like that behind, so they're shown as empty leftovers
 with no on/off switch rather than being handed to launchctl under a name
 guessed from the filename.
 
-Stopping a process is a different matter, and the dashboard tries not to
+Stopping a process is a different matter, and Stowaway tries not to
 pretend otherwise. Almost nothing in the process list runs on its own: the
 assistant backends are children of your editor, the model server is a child
 of its app. Killing one of those frees the memory now, and the parent starts
@@ -212,11 +212,11 @@ it again whenever it likes. So each row traces its ancestry to whatever owns
 it and says "restarted by Visual Studio Code" in the row, and the
 confirmation repeats it. To stop something like that for good you turn off
 the background item that starts the app's helper, or quit the app; the
-dashboard can do the first and says so rather than implying a kill is final.
+Stowaway can do the first and says so rather than implying a kill is final.
 
 `build_app.sh` wraps all of it in an AppleScript applet: start the server if
 it isn't already up, open the browser, and on quit kill whatever is listening
-on port 8765. Listening specifically: a browser tab with the dashboard open
+on port 8765. Listening specifically: a browser tab with Stowaway open
 holds a connection on the same port, and an earlier version of the quit
 handler would have killed the browser along with the server.
 
@@ -225,7 +225,7 @@ handler would have killed the browser along with the server.
 It's a web page with kill buttons on it, so:
 
 The server only binds to 127.0.0.1, rejects any request with the wrong Host
-header, and rejects any POST whose Origin isn't the dashboard itself. Without
+header, and rejects any POST whose Origin isn't Stowaway itself. Without
 that last check a website you happened to have open could POST to these
 endpoints in the background.
 
@@ -262,7 +262,7 @@ off is how your employer reaches this machine.
 Command lines are escaped before they're rendered, on the assumption that a
 process name is attacker-controlled text.
 
-![A confirmation dialog reading "Stop 'Unrecognized program in a temporary folder'?" over the dimmed dashboard.](docs/screenshots/04-confirmation.png)
+![A confirmation dialog reading "Stop 'Unrecognized program in a temporary folder'?" over the dimmed page.](docs/screenshots/04-confirmation.png)
 
 ## What it won't do
 
@@ -288,7 +288,7 @@ anything else.
 Nothing leaves the machine. No network calls, no analytics, no API keys, and
 no way for the page to be reached from another device. Your scan history stays
 in `review_state.json` in the project folder, and you can delete it whenever
-you like; the dashboard just starts over.
+you like; Stowaway just starts over.
 
 ## License
 

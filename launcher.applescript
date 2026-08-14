@@ -1,18 +1,18 @@
--- Cleanup Dashboard launcher applet (template).
+-- Stowaway launcher applet (template).
 -- Do not compile this file directly: run ./build_app.sh, which fills in
 -- the __SERVER_SCRIPT__ placeholder with this project's location and
 -- installs the compiled app into /Applications.
 --
 -- Double-click the app: starts the server (if not already running) and
--- opens the dashboard in the default browser. Stays in the Dock while
+-- opens Stowaway in the default browser. Stays in the Dock while
 -- running. Quit (Cmd-Q or Dock right-click > Quit): stops the server.
 
 property serverURL : "http://127.0.0.1:8765"
 property serverScript : "__SERVER_SCRIPT__"
 property tokenFile : "__PROJECT_DIR__/.session_token"
 
--- Match only the LISTENing process: a browser tab's open connection to the
--- dashboard also shows up under tcp:8765, and must be neither counted as
+-- Match only the LISTENing process: a browser tab's open connection to
+-- Stowaway also shows up under tcp:8765, and must be neither counted as
 -- the server nor killed with it.
 on serverRunning()
 	try
@@ -59,12 +59,12 @@ on run
 	startAndOpen()
 end run
 
--- Clicking the Dock icon while already running re-opens the dashboard tab.
+-- Clicking the Dock icon while already running re-opens the Stowaway tab.
 on reopen
 	startAndOpen()
 end reopen
 
--- Kill whatever owns the dashboard port, so quit works even for a server
+-- Kill whatever owns the Stowaway port, so quit works even for a server
 -- that was started by hand from Terminal.
 on quit
 	try

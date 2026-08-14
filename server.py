@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backend for the cleanup dashboard.
+"""Backend for Stowaway.
 
 Scans three things:
   - processes that look like AI agents or agent backends (Claude Code, Codex,
@@ -17,7 +17,7 @@ and whatever safe/bogus mark you've given it. That file is what makes the
 NEW badge work.
 
 The HTTP side is deliberately restricted. It binds to localhost, and it drops
-requests whose Host or Origin header isn't this dashboard, otherwise any page
+requests whose Host or Origin header isn't Stowaway itself, otherwise any page
 in your browser could POST to the kill endpoint. Every /api request must also
 carry a per-session token that only travels through the URL opened at startup,
 because localhost is reachable by every process on the machine, not just
@@ -1185,7 +1185,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _origin_ok(self, is_post):
-        """Reject requests that don't come from the dashboard itself.
+        """Reject requests that don't come from Stowaway itself.
         Browsers always send Host, and send Origin on cross-site POSTs, so
         this blocks CSRF/DNS-rebinding against the destructive endpoints."""
         host = self.headers.get("Host", "")
@@ -1319,7 +1319,7 @@ def main():
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     _write_token_file()
     url = f"http://{HOST}:{PORT}/?token={TOKEN}"
-    print(f"Cleanup dashboard running at {url}")
+    print(f"Stowaway running at {url}")
     print("(the token is this session's key; Ctrl+C to stop)")
     if "--no-browser" not in sys.argv:
         try:
