@@ -211,7 +211,7 @@ of its app. Killing one of those frees the memory now, and the parent starts
 it again whenever it likes. So each row traces its ancestry to whatever owns
 it and says "restarted by Visual Studio Code" in the row, and the
 confirmation repeats it. To stop something like that for good you turn off
-the background item that starts the app's helper, or quit the app; the
+the background item that starts the app's helper, or quit the app;
 Stowaway can do the first and says so rather than implying a kill is final.
 
 `build_app.sh` wraps all of it in an AppleScript applet: start the server if
