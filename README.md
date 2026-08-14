@@ -6,8 +6,6 @@ don't want.
 
 ![The dashboard: summary cards along the top, then a table of running processes. Each row has a name, a description, an assessment badge, memory and CPU figures, and a Stop button.](docs/screenshots/01-overview.png)
 
-> Every screenshot here uses made-up data. None of it came off a real machine.
-
 ## Why I built it
 
 I set up a small agent one evening to watch rental listings for a new home,
@@ -138,7 +136,7 @@ you can be fairly relaxed about it.
 
 Your own verdicts override the automatic ones, and actions report back:
 
-![One agent marked safe, another marked bogus and turned off, with a toast reading "disabled (unloaded + plist renamed)".](docs/screenshots/05-verdict-and-toast.png)
+![One agent marked safe, another marked bogus and turned off, with a toast reading "turned off (unloaded and plist renamed)".](docs/screenshots/05-verdict-and-toast.png)
 
 Cron jobs are treated the same way:
 
