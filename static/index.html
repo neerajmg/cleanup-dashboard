@@ -20,6 +20,8 @@
     --ok: #16a34a;
     --ok-weak: #f0fdf4;
     --muted-weak: #eef0f3;
+    --row-alt: #fafbfc;
+    --row-hover: #eef2f7;
     --radius: 10px;
     --shadow: 0 4px 16px rgba(0,0,0,0.15);
   }
@@ -39,6 +41,8 @@
       --ok: #4ade80;
       --ok-weak: #12241a;
       --muted-weak: #20242c;
+      --row-alt: #1b1f27;
+      --row-hover: #222732;
       --shadow: 0 4px 16px rgba(0,0,0,0.5);
     }
   }
@@ -118,6 +122,8 @@
     vertical-align: top;
   }
   tr:last-child td { border-bottom: none; }
+  tbody tr:nth-child(even) td { background: var(--row-alt); }
+  tbody tr:hover td { background: var(--row-hover); }
   th {
     font-size: 11px; text-transform: uppercase; color: var(--text-muted);
     font-weight: 600; letter-spacing: 0.03em;
@@ -143,7 +149,14 @@
   .badge.neutral { background: var(--accent-weak); color: var(--accent); }
   .badge.muted { background: var(--muted-weak); color: var(--text-muted); }
 
-  .row-actions { display: flex; gap: 6px; align-items: flex-start; }
+  /* A table cell that is also a flex container drops out of the row's shared
+     height, so the buttons float free of the row they belong to. Keep the cell
+     a cell and flex an inner box instead. */
+  /* font-size: 0 swallows the newlines between the buttons in the template,
+     which would otherwise add a stray text space to every gap. */
+  td.row-actions { white-space: nowrap; font-size: 0; vertical-align: middle; }
+  td.row-actions > * { display: inline-block; vertical-align: top; font-size: 14px; }
+  td.row-actions > * + * { margin-left: 6px; }
   tr.off { opacity: 0.55; }
   tr.off .item-name { font-weight: 500; }
 
