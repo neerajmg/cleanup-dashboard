@@ -30,7 +30,7 @@ So I wrote the thing I wanted that night.
 
 ## What it does
 
-One page, three lists:
+One page, four lists:
 
 - processes running now that look like AI agents or agent backends
 - every LaunchAgent in `~/Library` and `/Library`, including ones already
