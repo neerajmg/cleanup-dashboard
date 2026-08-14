@@ -10,7 +10,7 @@ don't want.
 
 I set up a small agent one evening to watch rental listings for a new home,
 put it on a schedule, and then stopped thinking about it. It woke up at 8:00
-and 16:00 on weekdays, and again every time the Mac booted. It never asked for
+and 16:00 on weekdays, and again every time I logged in. It never asked for
 anything or showed a window, so there was nothing to remind me it existed —
 not even after I'd found a place and stopped looking. I only found it again
 because I asked an AI assistant to go through my background processes and tell
@@ -30,7 +30,7 @@ So I wrote the thing I wanted that night.
 
 ## What it does
 
-One page, four lists:
+One page, four sources:
 
 - processes running now that look like AI agents or agent backends
 - every LaunchAgent in `~/Library` and `/Library`, including ones already
@@ -224,9 +224,10 @@ handler would have killed the browser along with the server.
 
 It's a web page with kill buttons on it, so:
 
-The server only binds to 127.0.0.1, and it rejects any request whose Host or
-Origin header isn't the dashboard itself. Without that second check a website
-you happened to have open could POST to these endpoints in the background.
+The server only binds to 127.0.0.1, rejects any request with the wrong Host
+header, and rejects any POST whose Origin isn't the dashboard itself. Without
+that last check a website you happened to have open could POST to these
+endpoints in the background.
 
 Browsers aren't the only thing that can reach a localhost port, though; every
 program on the Mac can. So the server also generates a random token each time
@@ -248,12 +249,13 @@ Agents under `/Library` are never renamed or deleted; that needs `sudo` and
 this tool doesn't ask for it. To turn one off it writes a `launchctl disable`
 override, which macOS stores in
 `/var/db/com.apple.xpc.launchd/disabled.<uid>.plist`, not in this project.
-That is the one change the tool makes outside its own folder, it applies to
-your account only, and Turn on reverses it. The confirmation dialog says so
-before you click.
+Everything else the tool changes is a file you can see (a plist in a Library
+folder, your crontab); this one isn't, so the confirmation dialog says where
+it goes before you click. It applies to your account only, and Turn on
+reverses it.
 
-Anything that looks like emergency alerts, anti-malware, VPN, or device
-management gets a second confirmation naming what it is, because a list of
+Anything that looks like emergency alerts, anti-malware, corporate VPN, or
+device management gets a second confirmation naming what it is, because a list of
 background tasks doesn't make it obvious that the row you're about to switch
 off is how your employer reaches this machine.
 
